@@ -1,0 +1,907 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Nova tabela - whatsapp_sessions
+model WhatsAppSession {
+  id         String                   @id @default(uuid())
+  tenantId   Int                      @map("tenant_id")
+  sessionName String                  @unique @map("session_name") @db.VarChar(255)
+  status     WhatsAppSessionStatus    @default(DISCONNECTED)
+  phoneNumber String?                 @map("phone_number") @db.VarChar(255)
+  profileName String?                 @map("profile_name") @db.VarChar(255)
+  qrCode     String?                  @map("qr_code") @db.Text
+  webhookUrl String?                  @map("webhook_url") @db.VarChar(500)
+  
+  // Configurações da sessão
+  settings   Json?
+  
+  // Timestamps
+  connectedAt DateTime? @map("connected_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Mensagens recebidas
+  receivedMessages ReceivedMessage[]
+
+  @@map("whatsapp_sessions")
+}
+
+// Nova tabela - received_messages
+model ReceivedMessage {
+  id               String   @id @default(uuid())
+  whatsappSessionId String  @map("whatsapp_session_id")
+  messageId        String   @unique @map("message_id") @db.VarChar(255)
+  fromPhone        String   @map("from_phone") @db.VarChar(255)
+  fromName         String?  @map("from_name") @db.VarChar(255)
+  messageText      String   @map("message_text") @db.Text
+  messageType      String   @map("message_type") @db.VarChar(50)
+  timestamp        DateTime
+  processed        Boolean  @default(false)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relações
+  whatsappSession WhatsAppSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
+
+  @@map("received_messages")
+}
+
+enum WhatsAppSessionStatus {
+  CONNECTING
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+model Tenant {
+  id                    Int       @id @default(autoincrement())
+  origin                String?   @db.VarChar(255)
+  clientName            String?   @map("client_name") @db.VarChar(255)
+  friendlyName          String?   @map("friendly_name") @db.VarChar(255)
+  clientGender          String?   @map("client_gender") @db.VarChar(1)
+  clientDateb           DateTime? @map("client_dateb") @db.Date
+  clientDocCnpj         String?   @map("client_doc_cnpj") @db.VarChar(255)
+  addrCep               String?   @map("addr_cep") @db.VarChar(9)
+  addrAddr              String?   @map("addr_addr") @db.Text
+  addrNumber            String?   @map("addr_number") @db.VarChar(45)
+  addrPlus              String?   @map("addr_plus") @db.VarChar(255)
+  addrArea              String?   @map("addr_area") @db.Text
+  addrCity              String?   @map("addr_city") @db.VarChar(255)
+  addrUf                String?   @map("addr_uf") @db.VarChar(2)
+  email                 String?   @db.VarChar(45)
+  tel1                  String?   @db.VarChar(255)
+  tel2                  String?   @db.VarChar(255)
+  freeDays              Int?      @default(0) @map("free_days")
+  dateAdd               DateTime? @default(now()) @map("date_add") @db.DateTime(0)
+  dateLastupdate        DateTime? @default(now()) @updatedAt @map("date_lastupdate") @db.DateTime(0)
+  otp                   String?   @db.VarChar(10)
+  active                Boolean?  @default(false)
+  asaasId               String?   @map("asaas_id") @db.VarChar(45)
+  tokenAsaas            String?   @map("token_asaas") @db.VarChar(255)
+  urlLogo               String?   @map("url_logo") @db.VarChar(255)
+  urlSignature          String?   @map("url_signature") @db.Text
+  testimonial1Name      String?   @map("testimonial1_name") @db.VarChar(255)
+  testimonial1Cpf       String?   @map("testimonial1_cpf") @db.VarChar(45)
+  testimonial1Signature String?   @map("testimonial1_signature") @db.Text
+  testimonial2Name      String?   @map("testimonial2_name") @db.VarChar(255)
+  testimonial2Signature String?   @map("testimonial2_signature") @db.Text
+  testimonial2Cpf       String?   @map("testimonial2_cpf") @db.VarChar(45)
+  wapack                Int?      @default(0)
+  waactive              Boolean?  @default(false)
+  aceitouTermo          Int?      @default(0) @map("aceitou_termo")
+  smtpHost              String?   @map("smtp_host") @db.VarChar(255)
+  smtpPort              Int?      @map("smtp_port")
+  smtpUser              String?   @map("smtp_user") @db.VarChar(255)
+  smtpPass              String?   @map("smtp_pass") @db.VarChar(255)
+  smtpSender            String?   @map("smtp_sender") @db.VarChar(255)
+
+  @@map("of_clients")
+}
+
+model of_company_payments_history {
+  id           Int       @id @default(autoincrement())
+  payment_id   Int?
+  bank_account Int?
+  price        String?   @db.VarChar(45)
+  payment_type String?   @db.VarChar(45)
+  description  String?   @db.Text
+  attachments  String?   @db.Text
+  user_add     Int?
+  date_add     DateTime? @db.DateTime(0)
+
+  @@map("_of_company_payments_history")
+}
+
+model of_cost_centers {
+  id          Int      @id @default(autoincrement())
+  name        String?  @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean? @default(false)
+
+  @@map("_of_cost_centers")
+}
+
+model of_cost_centers_sub {
+  id          Int      @id @default(autoincrement())
+  cost_id     Int
+  name        String?  @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean? @default(false)
+
+  @@map("_of_cost_centers_sub")
+}
+
+model of_cost_centers_sub_sub {
+  id          Int      @id @default(autoincrement())
+  cost_id     Int
+  cost_sub_id Int
+  name        String?  @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean? @default(false)
+
+  @@map("_of_cost_centers_sub_sub")
+}
+
+model admin_params {
+  id         Int       @id @default(autoincrement())
+  key        String    @unique(map: "key") @db.VarChar(100)
+  val        String?   @db.Text
+  created_at DateTime? @default(now()) @db.DateTime(0)
+  updated_at DateTime? @default(now()) @db.DateTime(0)
+}
+
+model all_patients {
+  id              Int       @id @default(autoincrement())
+  owner           Int
+  id_legacy       BigInt?
+  photo           String?   @db.VarChar(100)
+  thumbnail       String?   @db.VarChar(100)
+  patients_name   String?   @db.VarChar(255)
+  patients_gender String?   @db.VarChar(10)
+  patients_dateb  DateTime? @db.Date
+  parent_name     String?   @db.VarChar(255)
+  parent_doc_cpf  String?   @db.VarChar(255)
+  addr_cep        String?   @db.VarChar(9)
+  addr_addr       String?   @db.Text
+  addr_number     String?   @db.VarChar(45)
+  addr_plus       String?   @db.VarChar(255)
+  addr_area       String?   @db.Text
+  addr_city       String?   @db.VarChar(255)
+  addr_uf         String?   @db.VarChar(2)
+  tel1            String?   @db.VarChar(255)
+  tel2            String?   @db.VarChar(255)
+  email           String?   @db.VarChar(255)
+  allergies       String?   @db.Text
+  historic        String?   @db.Text
+  asaas_id        String?   @db.VarChar(45)
+  user_add        Int?
+  asaas_id_forte  String?   @db.VarChar(45)
+  company_add     Int?
+  date_add        DateTime? @default(now()) @db.DateTime(0)
+  user_lastupdate Int?
+  date_lastupdate DateTime? @default(now()) @db.DateTime(0)
+  active          Boolean?  @default(true)
+
+  @@index([patients_name], map: "patients_name")
+  @@index([tel1], map: "tel1")
+}
+
+model all_vindi_hooks {
+  id       Int       @id @default(autoincrement())
+  owner    Int
+  datetime DateTime? @db.DateTime(0)
+  body     String?   @db.Text
+}
+
+model anamnese_models {
+  id                Int                 @id @default(autoincrement())
+  owner             Int
+  name              String              @db.VarChar(255)
+  created_at        DateTime?           @default(now()) @db.DateTime(0)
+  active            Int?                @default(1)
+  anamnese_sessions anamnese_sessions[]
+}
+
+model anamnese_questions {
+  id                Int                               @id @default(autoincrement())
+  section_id        Int
+  question          String                            @db.Text
+  response_type     anamnese_questions_response_type? @default(text)
+  alert             Boolean?                          @default(false)
+  position          Int?                              @default(0)
+  anamnese_sessions anamnese_sessions                 @relation(fields: [section_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "anamnese_questions_ibfk_1")
+
+  @@index([section_id], map: "section_id")
+}
+
+model anamnese_sessions {
+  id                 Int                  @id @default(autoincrement())
+  model_id           Int
+  name               String               @db.VarChar(255)
+  position           Int?                 @default(0)
+  anamnese_questions anamnese_questions[]
+  anamnese_models    anamnese_models      @relation(fields: [model_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "anamnese_sessions_ibfk_1")
+
+  @@index([model_id], map: "model_id")
+}
+
+model app_params {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique(map: "name") @db.VarChar(100)
+  val         String?   @db.Text
+  description String?   @db.VarChar(255)
+  created_at  DateTime? @default(now()) @db.DateTime(0)
+  updated_at  DateTime? @default(now()) @db.DateTime(0)
+}
+
+model asaas_webhooks {
+  id    Int       @id @default(autoincrement())
+  owner Int
+  date  DateTime? @db.DateTime(0)
+  body  String?   @db.Text
+  tipo  Boolean?  @default(false)
+}
+
+model feedbacks {
+  id              Int       @id @default(autoincrement())
+  usuario         String    @db.VarChar(255)
+  url             String    @db.Text
+  descricao       String    @db.Text
+  screenshot_path String    @db.Text
+  created_at      DateTime? @default(now()) @db.Timestamp(0)
+}
+
+model gas_admusr {
+  id     Int      @id @default(autoincrement())
+  name   String?  @db.VarChar(255)
+  email  String?  @db.VarChar(255)
+  login  String?  @db.VarChar(255)
+  pwd    String?  @db.VarChar(255)
+  active Boolean? @default(false)
+  level  Int?     @default(3) @db.TinyInt
+}
+
+model of_bank_accounts {
+  id          Int      @id @default(autoincrement())
+  owner       Int
+  name        String?  @db.VarChar(255)
+  ammount     String?  @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean? @default(false)
+}
+
+model of_bank_accounts_transfer {
+  id               Int       @id @default(autoincrement())
+  owner            Int
+  bank_account     Int?
+  part             Int?
+  transaction_type Boolean?
+  ammount          String?   @db.VarChar(45)
+  description      String?   @db.Text
+  attachments      String?   @db.Text
+  date_add         DateTime? @db.DateTime(0)
+  user_add         Int?
+  ip_add           String?   @db.VarChar(45)
+}
+
+model of_contracts {
+  id          Int     @id @default(autoincrement())
+  owner       Int
+  name        String? @db.VarChar(255)
+  description String? @db.Text
+  active      String? @db.VarChar(45)
+}
+
+model of_finan_categories {
+  id          Int      @id @default(autoincrement())
+  owner       Int
+  name        String?  @db.VarChar(255)
+  main_folder Int?
+  active      Boolean? @default(true)
+}
+
+model of_finan_company_payments {
+  id           Int       @id @default(autoincrement())
+  owner        Int
+  date_due     DateTime? @db.Date
+  name         String?   @db.VarChar(255)
+  categorie    Int?
+  cost_center  Int?      @default(0)
+  partner      Int?
+  price        String?   @db.VarChar(45)
+  description  String?   @db.Text
+  attachments  String?   @db.Text
+  date_add     DateTime? @db.DateTime(0)
+  user_add     Int?
+  ip_add       String?   @db.VarChar(45)
+  date_upd     DateTime? @db.DateTime(0)
+  user_upd     Int?
+  ip_upd       String?   @db.VarChar(45)
+  price_pay    String?   @db.VarChar(45)
+  sts          Boolean?  @default(false)
+  bank_account Int?
+  payment_type String?   @db.VarChar(45)
+  date_payd    DateTime? @db.DateTime(0)
+  user_payd    Int?
+  ip_payd      String?   @db.VarChar(45)
+
+  @@index([bank_account], map: "bank_account")
+  @@index([categorie], map: "categorie")
+  @@index([cost_center], map: "cost_center")
+  @@index([partner], map: "partner")
+  @@index([sts], map: "sts")
+}
+
+model of_finan_crm {
+  id          Int       @id @default(autoincrement())
+  patient_id  Int
+  description String?   @db.Text
+  date_add    DateTime? @db.DateTime(0)
+  user_add    DateTime? @db.DateTime(0)
+  ip_add      DateTime? @db.DateTime(0)
+}
+
+model of_finan_folders {
+  id          Int      @id @default(autoincrement())
+  owner       Int
+  name        String?  @db.VarChar(255)
+  main_folder Int?
+  active      Boolean? @default(true)
+}
+
+model of_finan_invoice_payment {
+  id           Int       @id @default(autoincrement())
+  owner        Int
+  legal_owner  Int?
+  invoice_id   Int?
+  automatic    Boolean?
+  datep        DateTime? @db.Date
+  value        String?   @db.VarChar(255)
+  categorie    Int?
+  cost_center  Int?
+  bank_account Int?
+  payment_type String?   @db.VarChar(45)
+  user_add     Int?
+  date_add     DateTime? @default(now()) @db.DateTime(0)
+  description  String?   @db.Text
+  attachments  String?   @db.Text
+}
+
+model of_finan_invoices {
+  id                  Int       @id @default(autoincrement())
+  owner               Int
+  type_owner          Boolean?  @default(false)
+  legal_owner         Int?
+  name                String?   @db.VarChar(255)
+  datev               DateTime? @db.Date
+  value               String?   @db.VarChar(255)
+  categorie           Int?
+  cost_center         Int?
+  payment_type        String?   @default("BOLETO") @db.VarChar(45)
+  description         String?   @db.Text
+  description_remove  String?   @db.Text
+  attachments_remove  String?   @db.Text
+  payment_status      Int?      @default(0)
+  user_add            Int?
+  date_add            DateTime? @default(now()) @db.DateTime(0)
+  user_lastupdate     Int?
+  date_lastupdate     DateTime? @default(now()) @db.DateTime(0)
+  active              Boolean?  @default(false)
+  asaas_return        String?   @db.Text
+  asaas_return_update String?   @db.Text
+  asaas_id            String?   @db.VarChar(45)
+  asaas_paylink       String?   @db.Text
+  asaas_url           String?   @db.Text
+  asaas_bs            String?   @db.Text
+  towner              Boolean?  @default(false)
+}
+
+model of_finan_partners {
+  id              Int       @id @default(autoincrement())
+  owner           Int
+  partner_name    String?   @db.VarChar(255)
+  partner_gender  String?   @db.VarChar(10)
+  partner_dateb   DateTime? @db.Date
+  partner_doc_cpf String?   @db.VarChar(255)
+  addr_cep        String?   @db.VarChar(9)
+  addr_addr       String?   @db.Text
+  addr_number     String?   @db.VarChar(45)
+  addr_plus       String?   @db.VarChar(255)
+  addr_area       String?   @db.Text
+  addr_city       String?   @db.VarChar(255)
+  addr_uf         String?   @db.VarChar(2)
+  tel1            String?   @db.VarChar(255)
+  tel2            String?   @db.VarChar(255)
+  email           String?   @db.VarChar(255)
+  login           String?   @db.VarChar(255)
+  pwd             String?   @db.VarChar(255)
+  bank_data       String?   @db.Text
+  certifications  String?   @db.Text
+  user_add        Int?
+  date_add        DateTime? @default(now()) @db.DateTime(0)
+  user_lastupdate Int?
+  date_lastupdate DateTime? @default(now()) @db.DateTime(0)
+  active          Boolean?  @default(false)
+}
+
+model of_gas_admusr {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  name        String?   @db.VarChar(255)
+  login       String?   @db.VarChar(255)
+  pwd         String?   @db.VarChar(255)
+  active      Boolean?  @default(false)
+  level       Boolean?  @default(true)
+  user_add    Int?
+  date_add    DateTime? @db.DateTime(0)
+  ip_add      String?   @db.VarChar(45)
+  user_update Int?
+  date_update DateTime? @db.DateTime(0)
+  ip_update   String?   @db.VarChar(45)
+  email       String    @db.VarChar(255)
+  password    String    @db.VarChar(255)
+}
+
+model of_general_data {
+  id       Int     @id @default(autoincrement())
+  owner    Int
+  name     String? @db.VarChar(255)
+  val_type String? @db.VarChar(45)
+  value    String? @db.VarChar(45)
+}
+
+model of_logs {
+  id         Int       @id @default(autoincrement())
+  owner      Int
+  user       Int?
+  date       DateTime? @db.DateTime(0)
+  ip         String?   @db.VarChar(45)
+  tipoacesso Int?
+}
+
+model of_logs_pages {
+  id    Int       @id @default(autoincrement())
+  owner Int
+  tipo  Int?
+  user  Int?
+  date  DateTime? @db.DateTime(0)
+  page  String?   @db.Text
+  ip    String?   @db.VarChar(45)
+}
+
+model of_logs_pages_adm {
+  id      Int       @id @default(autoincrement())
+  tipo    Int?
+  user    Int?
+  date    DateTime? @db.DateTime(0)
+  page    String?   @db.Text
+  payload String?   @db.Text
+  ip      String?   @db.VarChar(45)
+
+  @@index([tipo], map: "tipo")
+  @@index([user], map: "user")
+}
+
+model of_partners {
+  id              Int       @id @default(autoincrement())
+  owner           Int
+  partner_name    String?   @db.VarChar(255)
+  partner_gender  String?   @db.VarChar(10)
+  partner_dateb   DateTime? @db.Date
+  partner_doc_cpf String?   @db.VarChar(255)
+  addr_cep        String?   @db.VarChar(9)
+  addr_addr       String?   @db.Text
+  addr_number     String?   @db.VarChar(45)
+  addr_plus       String?   @db.VarChar(255)
+  addr_area       String?   @db.Text
+  addr_city       String?   @db.VarChar(255)
+  addr_uf         String?   @db.VarChar(2)
+  tel1            String?   @db.VarChar(255)
+  tel2            String?   @db.VarChar(255)
+  email           String?   @db.VarChar(255)
+  login           String?   @db.VarChar(255)
+  pwd             String?   @db.VarChar(255)
+  bank_data       String?   @db.Text
+  certifications  String?   @db.Text
+  user_add        Int?
+  date_add        DateTime? @default(now()) @db.DateTime(0)
+  user_lastupdate Int?
+  date_lastupdate DateTime? @default(now()) @db.DateTime(0)
+  active          Boolean?  @default(false)
+}
+
+model of_partners_schedlock {
+  id         Int     @id @default(autoincrement())
+  owner      Int
+  partner_id Int?
+  dow        Int?
+  time_start String? @db.VarChar(45)
+  time_end   String? @db.VarChar(255)
+}
+
+model of_pat_files {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  patient_id  Int?
+  description String?   @db.Text
+  attachments String?   @db.Text
+  user_add    Int?
+  date_add    DateTime? @db.DateTime(0)
+}
+
+model of_patient_contratcs {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  patient_id  Int?
+  model       String?   @db.Text
+  description String?   @db.Text
+  payment     String?   @db.Text
+  signature   String?   @db.Text
+  date_add    DateTime? @db.DateTime(0)
+  user_add    Int?
+  ip_add      String?   @db.VarChar(100)
+}
+
+model of_patients_anamnesis {
+  id                               Int       @id @default(autoincrement())
+  owner                            Int
+  patient_id                       Int?
+  reason                           String?   @db.Text
+  last_consult                     String?   @db.VarChar(255)
+  reference                        String?   @db.VarChar(255)
+  reference_other                  String?   @db.VarChar(255)
+  diseases                         String?   @db.VarChar(255)
+  diseases_other                   String?   @db.VarChar(255)
+  in_treatment                     Int?      @default(9) @db.TinyInt
+  in_medication                    Int?      @default(9) @db.TinyInt
+  in_medication_other              String?   @db.VarChar(255)
+  dental_anesthesia                Int?      @default(9) @db.TinyInt
+  dental_anesthesia_reaction       Boolean?  @default(false)
+  dental_anesthesia_reaction_other String?   @db.VarChar(255)
+  alergies                         Int?      @default(9) @db.TinyInt
+  alergies_other                   String?   @db.VarChar(255)
+  easy_tiredness                   Int?      @default(9) @db.TinyInt
+  bleeds_alot                      Int?      @default(9) @db.TinyInt
+  fast_healing                     Int?      @default(9) @db.TinyInt
+  blood_exam_alert                 Int?      @default(9) @db.TinyInt
+  blood_exam_alert_other           String?   @db.VarChar(255)
+  painhdc                          Int?      @default(9) @db.TinyInt
+  painhdc_other                    String?   @db.VarChar(255)
+  surgery                          Int?      @default(9) @db.TinyInt
+  gums_bleed                       Boolean?  @default(false)
+  tooth_sensitivity                Int?      @default(9) @db.TinyInt
+  bad_taste                        Int?      @default(9) @db.TinyInt
+  jaw_snaps                        Int?      @default(9) @db.TinyInt
+  atm_pain                         Int?      @default(9) @db.TinyInt
+  smile_better                     Int?      @default(9) @db.TinyInt
+  other_info                       String?   @db.VarChar(255)
+  contraceptive                    Int?      @default(9) @db.TinyInt
+  pregnant                         Int?      @default(9) @db.TinyInt
+  pregnant_other                   String?   @db.VarChar(255)
+  brush_teeth                      String?   @db.VarChar(255)
+  dental_floss                     Int?      @default(9) @db.TinyInt
+  tooth_clenching                  Int?      @default(9) @db.TinyInt
+  bite_lips                        Int?      @default(9) @db.TinyInt
+  bite_nails                       Int?      @default(9) @db.TinyInt
+  smoke                            Int?      @default(9) @db.TinyInt
+  smoke_other                      String?   @db.VarChar(255)
+  alcoholic                        Int?      @default(9) @db.TinyInt
+  drugs                            Int?      @default(9) @db.TinyInt
+  extrabucal                       String?   @db.VarChar(255)
+  extrabucal_other                 String?   @db.VarChar(255)
+  intrabucal                       String?   @db.VarChar(255)
+  intrabucal_other                 String?   @db.VarChar(255)
+  oral_hygiene                     Int?      @default(9) @db.TinyInt
+  date_add                         DateTime? @db.DateTime(0)
+  user_add                         Int?
+  ip_add                           String?   @db.VarChar(45)
+  date_upd                         DateTime? @db.DateTime(0)
+  user_upd                         Int?
+  ip_upd                           String?   @db.VarChar(45)
+  sts                              Boolean?  @default(false)
+}
+
+model of_patients_birthday {
+  id         Int       @id @default(autoincrement())
+  owner      Int
+  patient_id Int?
+  year       Int?
+  date_add   DateTime? @db.DateTime(0)
+  user_add   String?   @db.VarChar(45)
+  ip_add     String?   @db.VarChar(45)
+
+  @@index([patient_id], map: "patient_id")
+}
+
+model of_patients_og {
+  id         Int       @id @default(autoincrement())
+  owner      Int
+  patient_id Int?
+  ogdata     String?   @db.Text
+  date_add   DateTime? @db.DateTime(0)
+  user_add   Int?
+  ip_add     String?   @db.VarChar(45)
+  date_upd   DateTime? @db.DateTime(0)
+  user_upd   Int?
+  ip_upd     String?   @db.VarChar(45)
+  sts        Boolean?  @default(false)
+}
+
+model of_patients_payments {
+  id           Int       @id @default(autoincrement())
+  owner        Int
+  patient_id   Int?
+  date_due     DateTime? @db.Date
+  payment_type String?   @db.VarChar(45)
+  name         String?   @db.VarChar(255)
+  price        String?   @db.VarChar(45)
+  price_payd   String?   @db.VarChar(45)
+  description  String?   @db.Text
+  attachments  String?   @db.Text
+  date_add     DateTime? @db.DateTime(0)
+  user_add     Int?
+  ip_add       String?   @db.VarChar(45)
+  date_upd     DateTime? @db.DateTime(0)
+  user_upd     Int?
+  ip_upd       String?   @db.VarChar(45)
+  date_payd    DateTime? @db.DateTime(0)
+  user_payd    Int?
+  ip_payd      String?   @db.VarChar(45)
+  sts          Boolean?  @default(false)
+}
+
+model of_patients_payments_history {
+  id           Int       @id @default(autoincrement())
+  owner        Int
+  payment_id   Int?
+  bank_account Int?
+  price        String?   @db.VarChar(45)
+  payment_type String?   @db.VarChar(45)
+  description  String?   @db.Text
+  attachments  String?   @db.Text
+  user_add     Int?
+  date_add     DateTime? @db.DateTime(0)
+}
+
+model of_ped_orc {
+  id                  Int       @id @default(autoincrement())
+  owner               Int
+  patient_id          Int?
+  partner_id          Int?      @default(0)
+  description         String?   @db.Text
+  description_payment String?   @db.Text
+  description_end     String?   @db.Text
+  date_add            DateTime? @db.DateTime(0)
+  user_add            Int?
+  ip_add              String?   @db.VarChar(100)
+  sts                 Boolean?  @default(false)
+  sts_crm             Boolean?  @default(false)
+}
+
+model of_ped_orc_crm {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  ped_id      Int?
+  description String?   @db.Text
+  date_add    DateTime? @db.DateTime(0)
+  user_add    Int?
+  ip_add      String?   @db.VarChar(100)
+}
+
+model of_ped_prod {
+  id               Int     @id @default(autoincrement())
+  owner            Int
+  ped_id           Int?
+  proc_id          Int?
+  proc_name        String? @db.VarChar(255)
+  proc_teeths      String? @db.VarChar(255)
+  proc_value       String? @db.VarChar(255)
+  proc_qtt         Int?
+  proc_value_total String? @db.VarChar(255)
+}
+
+model of_procedures {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  name        String?   @db.VarChar(255)
+  longi       Int?
+  price_sell  String?   @db.VarChar(255)
+  description String?   @db.Text
+  attachments String?   @db.Text
+  user_add    Int?
+  date_add    DateTime? @default(now()) @db.DateTime(0)
+  active      Boolean?  @default(false)
+}
+
+model of_procedures_partner {
+  id           Int     @id @default(autoincrement())
+  owner        Int
+  partner_id   Int?
+  procedure_id Int?
+  value        String? @db.VarChar(45)
+}
+
+model of_products {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  name        String?   @db.VarChar(255)
+  codebar     String?   @db.VarChar(255)
+  series      String?   @db.VarChar(255)
+  lote        String?   @db.VarChar(255)
+  valid       DateTime? @db.Date
+  price_buy   String?   @db.VarChar(255)
+  price_sell  String?   @db.VarChar(255)
+  description String?   @db.Text
+  attachments String?   @db.Text
+  user_add    Int?
+  date_add    DateTime? @default(now()) @db.DateTime(0)
+  active      Boolean?  @default(false)
+}
+
+model of_products_stock {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  product_id  Int?
+  room_id     Int?      @default(0)
+  quantity    String?   @db.VarChar(255)
+  ticket      Int?
+  description String?   @db.Text
+  attachments String?   @db.Text
+  user_add    Int?
+  date_add    DateTime? @default(now()) @db.DateTime(0)
+}
+
+model of_recipes {
+  id          Int     @id @default(autoincrement())
+  owner       Int
+  partner     Int?
+  name        String? @db.VarChar(255)
+  description String? @db.Text
+  active      String? @db.VarChar(45)
+}
+
+model of_recipes_patient {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  partner     Int?
+  patient     Int?
+  name        String?   @db.VarChar(255)
+  description String?   @db.Text
+  date_add    DateTime? @db.DateTime(0)
+  user_add    Int?
+  ip_add      String?   @db.VarChar(100)
+}
+
+model of_rooms {
+  id          Int      @id @default(autoincrement())
+  owner       Int
+  name        String?  @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean? @default(false)
+}
+
+model of_schedules {
+  id                  Int       @id @default(autoincrement())
+  owner               Int
+  sts                 Int?
+  sts_payment         Int?
+  patient             Int?
+  partner             Int?
+  surgery             Boolean?  @default(false)
+  dates               DateTime? @db.Date
+  times               String?   @db.VarChar(10)
+  procedures          String?   @db.Text
+  longi               Int?
+  price               String?   @db.VarChar(45)
+  description         String?   @db.Text
+  description_payment String?   @db.Text
+  attachments         String?   @db.Text
+  user_add            Int?
+  date_add            DateTime? @db.DateTime(0)
+  user_lastupdate     Int?
+  date_lastupdate     DateTime? @db.DateTime(0)
+  whatsConf           Boolean?  @default(false)
+  sedation            Boolean?  @default(false)
+  difficult           Boolean?  @default(false)
+  laboratory          Boolean?  @default(false)
+
+  @@index([dates], map: "dates")
+  @@index([partner], map: "partner")
+  @@index([sts], map: "sts")
+}
+
+model of_schedules_attended {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  sched_id    Int?
+  description String?   @db.Text
+  attachments String?   @db.Text
+  user_add    Int?
+  date_add    DateTime? @db.DateTime(0)
+}
+
+model of_schedules_payments {
+  id          Int       @id @default(autoincrement())
+  owner       Int
+  sched_id    Int?
+  price       String?   @db.VarChar(45)
+  description String?   @db.Text
+  attachments String?   @db.Text
+  user_add    Int?
+  date_add    DateTime? @db.DateTime(0)
+}
+
+model wa_messages {
+  id          Int                   @id @default(autoincrement())
+  schedule_id Int
+  owner       Int
+  user_id     Int
+  template_id Int?
+  direction   wa_messages_direction
+  message     String                @db.Text
+  status      wa_messages_status?
+  created_at  DateTime?             @default(now()) @db.DateTime(0)
+}
+
+model wa_queue {
+  id          Int              @id @default(autoincrement())
+  schedule_id Int
+  owner_id    Int
+  user_id     Int
+  template_id Int
+  status      wa_queue_status? @default(Aguardando)
+  created_at  DateTime?        @default(now()) @db.DateTime(0)
+  sent_at     DateTime?        @db.DateTime(0)
+}
+
+model wa_sessions {
+  owner      String    @id @db.VarChar(100)
+  name       String?   @db.VarChar(100)
+  number     String?   @db.VarChar(20)
+  status     String?   @default("disconnected") @db.VarChar(20)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+}
+
+model wa_tempdefault {
+  id      Int      @id @default(autoincrement())
+  type    String   @unique(map: "uq_type") @db.VarChar(50)
+  content String   @db.Text
+  active  Boolean? @default(true)
+}
+
+model wa_templates {
+  id         Int       @id @default(autoincrement())
+  owner_id   Int
+  type       String    @db.VarChar(50)
+  content    String    @db.Text
+  active     Boolean?  @default(true)
+  created_at DateTime? @default(now()) @db.DateTime(0)
+}
+
+enum anamnese_questions_response_type {
+  text
+  boolean
+}
+
+enum wa_messages_direction {
+  sent
+  received
+}
+
+enum wa_queue_status {
+  Aguardando
+  Enviada
+  Cancelada
+  Erro
+}
+
+enum wa_messages_status {
+  Enviada
+  Recebida
+  Erro
+}
