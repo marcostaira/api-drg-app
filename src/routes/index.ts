@@ -4,6 +4,7 @@
 import { Router } from "express";
 import whatsappRoutes from "./whatsappRoutes";
 import webhookRoutes from "./webhookRoutes";
+import queueRoutes from "./queueRoutes";
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.get("/", (req, res) => {
  */
 router.use("/whatsapp", whatsappRoutes);
 
+router.use("/queue", queueRoutes);
 /**
  * Rotas de webhooks
  * @prefix /api/webhook

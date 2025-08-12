@@ -11,7 +11,7 @@ import type {
   EvolutionSessionStatus,
   EvolutionSessionInfo,
   SendTextMessagePayload,
-} from "../types/evolution";
+} from "../types/evolution.types";
 
 export class EvolutionService {
   private baseURL: string;

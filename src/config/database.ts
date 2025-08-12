@@ -1,47 +1,61 @@
 // src/config/database.ts
-// Configuração do Prisma Client com melhor gerenciamento
+// Configuração do banco de dados com funções de teste e desconexão
 
 import { PrismaClient } from "@prisma/client";
+import { logger } from "../utils/logger";
 
-// Extensão do globalThis para incluir o Prisma
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-// Configuração do Prisma Client
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "info", "warn", "error"]
-        : ["error"],
-    errorFormat: "pretty",
+    log: process.env.NODE_ENV === "development" ? ["query"] : ["error"],
   });
 
-// Em desenvolvimento, reutilizar a instância global para evitar muitas conexões
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
-// Função para testar a conexão com o banco
+/**
+ * Testa a conexão com o banco de dados
+ */
 export async function testDatabaseConnection(): Promise<boolean> {
   try {
     await prisma.$connect();
+    
+    // Fazer uma query simples para verificar se realmente está conectado
+    await prisma.$queryRaw`SELECT 1`;
+    
     console.log("✅ Conexão com banco de dados estabelecida");
     return true;
   } catch (error) {
     console.error("❌ Erro ao conectar com banco de dados:", error);
+    logger.error("Falha na conexão com banco de dados", error);
     return false;
   }
 }
 
-// Função para desconectar do banco graciosamente
+/**
+ * Desconecta do banco de dados
+ */
 export async function disconnectDatabase(): Promise<void> {
   try {
     await prisma.$disconnect();
     console.log("✅ Desconectado do banco de dados");
   } catch (error) {
-    console.error("❌ Erro ao desconectar do banco de dados:", error);
+    console.error("⚠️ Erro ao desconectar do banco de dados:", error);
+    logger.error("Erro ao desconectar do banco", error);
+  }
+}
+
+/**
+ * Verifica se o banco está conectado
+ */
+export async function isDatabaseConnected(): Promise<boolean> {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return true;
+  } catch {
+    return false;
   }
 }

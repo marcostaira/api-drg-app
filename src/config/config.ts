@@ -1,66 +1,62 @@
 // src/config/config.ts
-// Configurações da aplicação com validação melhorada
+// Configurações da aplicação com queue settings
 
 import { z } from "zod";
 
-// Schema de validação para as configurações
 const configSchema = z.object({
-  // Configurações do servidor
-  port: z.coerce.number().min(1).max(65535).default(3000),
+  // Server
+  port: z.coerce.number().default(3000),
   nodeEnv: z.enum(["development", "production", "test"]).default("development"),
 
-  // Configurações do banco de dados
-  databaseUrl: z.string().url("URL do banco de dados deve ser válida"),
+  // Database
+  databaseUrl: z.string().url(),
 
-  // Configurações de segurança
-  allowedOrigins: z
-    .string()
-    .transform((str) => str.split(",").map((origin) => origin.trim())),
-  rateLimitWindowMs: z.coerce
-    .number()
-    .positive()
-    .default(15 * 60 * 1000), // 15 minutos
-  rateLimitMaxRequests: z.coerce.number().positive().default(100),
+  // CORS
+  allowedOrigins: z.string().transform((str) => str.split(",")),
 
-  // Configurações da Evolution API
-  evolutionApiUrl: z.string().url("URL da Evolution API deve ser válida"),
-  evolutionApiKey: z.string().min(1, "Chave da Evolution API é obrigatória"),
+  // Rate Limiting
+  rateLimitWindowMs: z.coerce.number().default(15 * 60 * 1000), // 15 minutes
+  rateLimitMaxRequests: z.coerce.number().default(100),
 
-  // Configurações de webhook
-  webhookBaseUrl: z.string().url("URL base do webhook deve ser válida"),
+  // Evolution API
+  evolutionApiUrl: z.string().url(),
+  evolutionApiKey: z.string(),
+
+  // Webhook
+  webhookBaseUrl: z.string().url(),
+
+  // Queue Settings
+  queueProcessInterval: z.coerce.number().default(5), // minutos
+  queueBatchSize: z.coerce.number().default(10), // mensagens por vez
+  queueDelayBetweenMessages: z.coerce.number().default(2000), // milissegundos
 });
 
-// Objeto de ambiente com validação
 const env = {
+  // Server
   port: process.env.PORT,
   nodeEnv: process.env.NODE_ENV,
+
+  // Database
   databaseUrl: process.env.DATABASE_URL,
-  allowedOrigins:
-    process.env.ALLOWED_ORIGINS ||
-    "http://localhost:3000,http://localhost:3001",
+
+  // CORS
+  allowedOrigins: process.env.ALLOWED_ORIGINS || "http://localhost:3000",
+
+  // Rate Limiting
   rateLimitWindowMs: process.env.RATE_LIMIT_WINDOW_MS,
   rateLimitMaxRequests: process.env.RATE_LIMIT_MAX_REQUESTS,
+
+  // Evolution API
   evolutionApiUrl: process.env.EVOLUTION_API_URL,
   evolutionApiKey: process.env.EVOLUTION_API_KEY,
+
+  // Webhook
   webhookBaseUrl: process.env.WEBHOOK_BASE_URL,
+
+  // Queue Settings
+  queueProcessInterval: process.env.QUEUE_PROCESS_INTERVAL,
+  queueBatchSize: process.env.QUEUE_BATCH_SIZE,
+  queueDelayBetweenMessages: process.env.QUEUE_DELAY_BETWEEN_MESSAGES,
 };
 
-// Validar e exportar configurações
 export const config = configSchema.parse(env);
-
-// Log das configurações (sem dados sensíveis)
-if (config.nodeEnv === "development") {
-  console.log("⚙️ Configurações carregadas:", {
-    port: config.port,
-    nodeEnv: config.nodeEnv,
-    allowedOrigins: config.allowedOrigins,
-    rateLimitWindowMs: config.rateLimitWindowMs,
-    rateLimitMaxRequests: config.rateLimitMaxRequests,
-    evolutionApiUrl: config.evolutionApiUrl,
-    evolutionApiKey: config.evolutionApiKey
-      ? "[CONFIGURADA]"
-      : "[NÃO CONFIGURADA]",
-    webhookBaseUrl: config.webhookBaseUrl,
-    databaseUrl: config.databaseUrl ? "[CONFIGURADA]" : "[NÃO CONFIGURADA]",
-  });
-}

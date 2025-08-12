@@ -12,7 +12,7 @@ import type {
   QRCodeData,
   ConnectionUpdateData,
   MessageData,
-} from "../types/whatsapp";
+} from "../types/whatsapp.types";
 
 export class WhatsAppService {
   /**
