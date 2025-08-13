@@ -1,10 +1,11 @@
 // src/services/whatsappService.ts
-// Serviço principal WhatsApp com verificações melhoradas
+// Serviço principal WhatsApp com API Key por sessão
 
 import { prisma } from "../config/database";
 import { evolutionService } from "./evolutionService";
 import { config } from "../config/config";
 import { WhatsAppSessionStatus } from "@prisma/client";
+import { logger } from "../utils/logger";
 import type {
   WhatsAppConnectionResult,
   WhatsAppSessionStatus as IWhatsAppSessionStatus,
@@ -13,16 +14,21 @@ import type {
   ConnectionUpdateData,
   MessageData,
 } from "../types/whatsapp.types";
+import type { SendTextMessageOptions } from "../types/evolution.types";
 
 export class WhatsAppService {
   /**
    * Conectar tenant ao WhatsApp com verificações completas
    * @param tenantId ID do tenant
+   * @param evolutionApiKey API Key específica do tenant/sessão
    * @returns Resultado da conexão
    */
-  async connectTenant(tenantId: number): Promise<WhatsAppConnectionResult> {
+  async connectTenant(
+    tenantId: number,
+    evolutionApiKey: string
+  ): Promise<WhatsAppConnectionResult> {
     try {
-      console.log("🚀 Iniciando processo de conexão para tenant:", tenantId);
+      logger.info("Iniciando processo de conexão para tenant", { tenantId });
 
       // 1. Verificar se o tenant existe no banco
       const tenant = await this.verifyTenantExists(tenantId);
@@ -37,10 +43,11 @@ export class WhatsAppService {
 
       // 3. Verificar se a sessão existe no Evolution API
       const sessionExistsInEvolution = await evolutionService.checkSession(
-        sessionName
+        sessionName,
+        evolutionApiKey
       );
 
-      console.log("📊 Status das verificações:", {
+      logger.debug("Status das verificações", {
         tenantId,
         tenantExists: !!tenant,
         sessionInDatabase: !!existingSession,
@@ -49,25 +56,34 @@ export class WhatsAppService {
 
       // 4. Se não existe sessão no Evolution, criar
       if (!sessionExistsInEvolution) {
-        await this.createEvolutionSession(sessionName, webhookUrl);
+        await this.createEvolutionSession(
+          sessionName,
+          evolutionApiKey,
+          webhookUrl
+        );
       }
 
-      // 5. Criar ou atualizar sessão no banco
+      // 5. Criar ou atualizar sessão no banco com API Key
       const session = await this.upsertDatabaseSession(
         tenantId,
         sessionName,
+        evolutionApiKey,
         webhookUrl,
         existingSession
       );
 
       // 6. Obter QR Code se necessário
-      const qrCode = await this.getQRCodeIfNeeded(sessionName, session.status);
+      const qrCode = await this.getQRCodeIfNeeded(
+        sessionName,
+        evolutionApiKey,
+        session.status
+      );
 
       if (qrCode) {
         await this.updateSessionQRCode(session.id, qrCode);
       }
 
-      console.log("✅ Processo de conexão finalizado:", {
+      logger.info("Processo de conexão finalizado", {
         tenantId,
         sessionId: session.id,
         status: session.status,
@@ -82,30 +98,25 @@ export class WhatsAppService {
         webhookUrl,
       };
     } catch (error: any) {
-      console.error("❌ Erro no processo de conexão:", {
-        tenantId,
-        error: error.message,
-      });
+      logger.error("Erro no processo de conexão", error, { tenantId });
       throw error;
     }
   }
 
   /**
    * Verificar se tenant existe no banco
-   * @param tenantId ID do tenant
-   * @returns Tenant ou null
    */
   private async verifyTenantExists(tenantId: number) {
-    console.log("🔍 Verificando se tenant existe no banco:", tenantId);
+    logger.debug("Verificando se tenant existe no banco", { tenantId });
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
     });
 
     if (tenant) {
-      console.log("✅ Tenant encontrado no banco:", tenantId);
+      logger.debug("Tenant encontrado no banco", { tenantId });
     } else {
-      console.log("❌ Tenant não encontrado no banco:", tenantId);
+      logger.warn("Tenant não encontrado no banco", { tenantId });
     }
 
     return tenant;
@@ -113,11 +124,9 @@ export class WhatsAppService {
 
   /**
    * Buscar sessão ativa no banco
-   * @param tenantId ID do tenant
-   * @returns Sessão ativa ou null
    */
   private async findActiveSession(tenantId: number) {
-    console.log("🔍 Buscando sessão ativa no banco:", tenantId);
+    logger.debug("Buscando sessão ativa no banco", { tenantId });
 
     const session = await prisma.whatsAppSession.findFirst({
       where: {
@@ -127,13 +136,13 @@ export class WhatsAppService {
     });
 
     if (session) {
-      console.log("✅ Sessão ativa encontrada no banco:", {
+      logger.debug("Sessão ativa encontrada no banco", {
         tenantId,
         sessionId: session.id,
         status: session.status,
       });
     } else {
-      console.log("❌ Nenhuma sessão ativa no banco:", tenantId);
+      logger.debug("Nenhuma sessão ativa no banco", { tenantId });
     }
 
     return session;
@@ -141,61 +150,61 @@ export class WhatsAppService {
 
   /**
    * Criar sessão no Evolution API
-   * @param sessionName Nome da sessão
-   * @param webhookUrl URL do webhook
    */
   private async createEvolutionSession(
     sessionName: string,
+    evolutionApiKey: string,
     webhookUrl: string
   ) {
-    console.log("🚀 Criando sessão no Evolution:", sessionName);
+    logger.info("Criando sessão no Evolution", { sessionName });
 
     try {
       // Criar nova sessão no Evolution
-      await evolutionService.createSession(sessionName, webhookUrl);
+      await evolutionService.createSession(
+        sessionName,
+        evolutionApiKey,
+        webhookUrl
+      );
 
       // Aguardar um pouco para a sessão ser criada
       await this.delay(2000);
 
       // Configurar sessão (não aceitar grupos, não sincronizar histórico)
-      await evolutionService.configureSession(sessionName);
+      await evolutionService.configureSession(sessionName, evolutionApiKey);
 
       // Tentar configurar webhook (não falhar se der erro)
       try {
-        await evolutionService.configureWebhook(sessionName, webhookUrl);
+        await evolutionService.configureWebhook(
+          sessionName,
+          evolutionApiKey,
+          webhookUrl
+        );
       } catch (webhookError: any) {
-        console.log("⚠️ Falha na configuração do webhook, mas continuando:", {
+        logger.warn("Falha na configuração do webhook, mas continuando", {
           sessionName,
           error: webhookError.message,
         });
         // Não falhar o processo todo por causa do webhook
       }
 
-      console.log("✅ Sessão criada e configurada no Evolution:", sessionName);
+      logger.info("Sessão criada e configurada no Evolution", { sessionName });
     } catch (error: any) {
-      console.error("❌ Erro ao criar sessão no Evolution:", {
-        sessionName,
-        error: error.message,
-      });
+      logger.error("Erro ao criar sessão no Evolution", error, { sessionName });
       throw error;
     }
   }
 
   /**
-   * Criar ou atualizar sessão no banco
-   * @param tenantId ID do tenant
-   * @param sessionName Nome da sessão
-   * @param webhookUrl URL do webhook
-   * @param existingSession Sessão existente ou null
-   * @returns Sessão do banco
+   * Criar ou atualizar sessão no banco com API Key
    */
   private async upsertDatabaseSession(
     tenantId: number,
     sessionName: string,
+    evolutionApiKey: string,
     webhookUrl: string,
     existingSession: any
   ) {
-    console.log("💾 Criando/atualizando sessão no banco:", {
+    logger.debug("Criando/atualizando sessão no banco", {
       tenantId,
       sessionName,
       hasExisting: !!existingSession,
@@ -206,17 +215,19 @@ export class WhatsAppService {
       create: {
         tenantId,
         sessionName,
+        evolutionApiKey, // Salvar API Key
         status: "CONNECTING",
         webhookUrl,
       },
       update: {
         status: "CONNECTING",
+        evolutionApiKey, // Atualizar API Key se mudou
         webhookUrl,
         updatedAt: new Date(),
       },
     });
 
-    console.log("✅ Sessão salva no banco:", {
+    logger.debug("Sessão salva no banco", {
       sessionId: session.id,
       status: session.status,
     });
@@ -226,46 +237,40 @@ export class WhatsAppService {
 
   /**
    * Obter QR Code se necessário
-   * @param sessionName Nome da sessão
-   * @param currentStatus Status atual da sessão
-   * @returns QR Code ou null
    */
   private async getQRCodeIfNeeded(
     sessionName: string,
+    evolutionApiKey: string,
     currentStatus: string
   ): Promise<string | null> {
     if (currentStatus === "CONNECTED") {
-      console.log(
-        "⏭️ Sessão já conectada, não precisa de QR Code:",
-        sessionName
-      );
+      logger.debug("Sessão já conectada, não precisa de QR Code", {
+        sessionName,
+      });
       return null;
     }
 
-    console.log("📱 Obtendo QR Code:", sessionName);
-    return await evolutionService.getQRCode(sessionName);
+    logger.debug("Obtendo QR Code", { sessionName });
+    return await evolutionService.getQRCode(sessionName, evolutionApiKey);
   }
 
   /**
    * Atualizar QR Code da sessão
-   * @param sessionId ID da sessão
-   * @param qrCode QR Code
    */
   private async updateSessionQRCode(sessionId: string, qrCode: string) {
     await prisma.whatsAppSession.update({
       where: { id: sessionId },
       data: { qrCode },
     });
-    console.log("✅ QR Code atualizado na sessão:", sessionId);
+    logger.debug("QR Code atualizado na sessão", { sessionId });
   }
 
   /**
    * Desconectar sessão
-   * @param tenantId ID do tenant
    */
   async disconnectSession(tenantId: number): Promise<void> {
     try {
-      console.log("🔌 Iniciando desconexão:", tenantId);
+      logger.info("Iniciando desconexão", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
         where: { tenantId },
@@ -275,8 +280,15 @@ export class WhatsAppService {
         throw new Error("Sessão não encontrada no banco de dados");
       }
 
+      if (!session.evolutionApiKey) {
+        throw new Error("API Key não configurada para esta sessão");
+      }
+
       // Desconectar no Evolution
-      await evolutionService.disconnectSession(session.sessionName);
+      await evolutionService.disconnectSession(
+        session.sessionName,
+        session.evolutionApiKey
+      );
 
       // Atualizar status no banco
       await prisma.whatsAppSession.update({
@@ -290,24 +302,19 @@ export class WhatsAppService {
         },
       });
 
-      console.log("✅ Sessão desconectada:", tenantId);
+      logger.info("Sessão desconectada", { tenantId });
     } catch (error: any) {
-      console.error("❌ Erro ao desconectar sessão:", {
-        tenantId,
-        error: error.message,
-      });
+      logger.error("Erro ao desconectar sessão", error, { tenantId });
       throw error;
     }
   }
 
   /**
    * Obter status da sessão
-   * @param tenantId ID do tenant
-   * @returns Status da sessão
    */
   async getSessionStatus(tenantId: number): Promise<IWhatsAppSessionStatus> {
     try {
-      console.log("📊 Obtendo status da sessão:", tenantId);
+      logger.debug("Obtendo status da sessão", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
         where: { tenantId },
@@ -321,15 +328,26 @@ export class WhatsAppService {
         };
       }
 
+      if (!session.evolutionApiKey) {
+        return {
+          connected: false,
+          status: session.status,
+          message: "API Key não configurada para esta sessão",
+        };
+      }
+
       // Obter status do Evolution
       const evolutionStatus = await evolutionService.getSessionStatus(
-        session.sessionName
-      );
-      const sessionInfo = await evolutionService.getSessionInfo(
-        session.sessionName
+        session.sessionName,
+        session.evolutionApiKey
       );
 
-      console.log("✅ Status obtido:", {
+      const sessionInfo = await evolutionService.getSessionInfo(
+        session.sessionName,
+        session.evolutionApiKey
+      );
+
+      logger.debug("Status obtido", {
         tenantId,
         dbStatus: session.status,
         evolutionState: evolutionStatus?.state,
@@ -346,10 +364,7 @@ export class WhatsAppService {
         sessionInfo,
       };
     } catch (error: any) {
-      console.error("❌ Erro ao obter status da sessão:", {
-        tenantId,
-        error: error.message,
-      });
+      logger.error("Erro ao obter status da sessão", error, { tenantId });
 
       return {
         connected: false,
@@ -361,25 +376,20 @@ export class WhatsAppService {
 
   /**
    * Processar webhook do Evolution
-   * @param tenantId ID do tenant
-   * @param webhookData Dados do webhook
    */
   async processWebhook(
     tenantId: number,
     webhookData: WebhookData
   ): Promise<void> {
     try {
-      console.log("🎣 Processando webhook:", {
-        tenantId,
-        event: webhookData.event,
-      });
+      logger.webhook(webhookData.event, webhookData.data);
 
       const session = await prisma.whatsAppSession.findFirst({
         where: { tenantId },
       });
 
       if (!session) {
-        console.log("❌ Sessão não encontrada para webhook:", tenantId);
+        logger.warn("Sessão não encontrada para webhook", { tenantId });
         return;
       }
 
@@ -399,26 +409,20 @@ export class WhatsAppService {
           break;
 
         default:
-          console.log("⚠️ Evento não tratado:", event);
+          logger.debug("Evento não tratado", { event });
       }
 
-      console.log("✅ Webhook processado:", {
-        tenantId,
-        event,
-      });
+      logger.debug("Webhook processado", { tenantId, event });
     } catch (error: any) {
-      console.error("❌ Erro ao processar webhook:", {
+      logger.error("Erro ao processar webhook", error, {
         tenantId,
         event: webhookData.event,
-        error: error.message,
       });
     }
   }
 
   /**
    * Processar atualização de QR Code
-   * @param sessionId ID da sessão
-   * @param data Dados do QR Code
    */
   private async handleQRCodeUpdate(
     sessionId: string,
@@ -429,14 +433,12 @@ export class WhatsAppService {
         where: { id: sessionId },
         data: { qrCode: data.qrCode },
       });
-      console.log("📱 QR Code atualizado via webhook:", sessionId);
+      logger.debug("QR Code atualizado via webhook", { sessionId });
     }
   }
 
   /**
    * Processar atualização de conexão
-   * @param sessionId ID da sessão
-   * @param data Dados da conexão
    */
   private async handleConnectionUpdate(
     sessionId: string,
@@ -453,15 +455,15 @@ export class WhatsAppService {
         phoneNumber = data.user?.id || null;
         profileName = data.user?.name || null;
         connectedAt = new Date();
-        console.log("✅ Conexão estabelecida:", sessionId);
+        logger.info("Conexão estabelecida", { sessionId });
         break;
       case "connecting":
         status = "CONNECTING";
-        console.log("🔄 Conectando:", sessionId);
+        logger.debug("Conectando", { sessionId });
         break;
       case "close":
         status = "DISCONNECTED";
-        console.log("❌ Conexão fechada:", sessionId);
+        logger.info("Conexão fechada", { sessionId });
         break;
     }
 
@@ -472,15 +474,13 @@ export class WhatsAppService {
         phoneNumber,
         profileName,
         connectedAt,
-        qrCode: status === "CONNECTED" ? null : undefined, // Limpar QR code quando conectar
+        qrCode: status === "CONNECTED" ? null : undefined,
       },
     });
   }
 
   /**
    * Processar mensagem recebida (apenas texto)
-   * @param sessionId ID da sessão
-   * @param data Dados da mensagem
    */
   private async handleMessageReceived(
     sessionId: string,
@@ -500,7 +500,7 @@ export class WhatsAppService {
           continue;
         }
 
-        // Ignorar mensagens de grupos (se não configurado corretamente)
+        // Ignorar mensagens de grupos
         if (message.key?.remoteJid?.includes("@g.us")) {
           continue;
         }
@@ -527,16 +527,15 @@ export class WhatsAppService {
           },
         });
 
-        console.log("📨 Mensagem salva:", {
+        logger.debug("Mensagem salva", {
           sessionId,
           fromPhone: message.key?.remoteJid?.replace("@s.whatsapp.net", ""),
           messageLength: messageText.length,
         });
       } catch (error) {
-        console.error("❌ Erro ao salvar mensagem:", {
+        logger.error("Erro ao salvar mensagem", error, {
           sessionId,
           messageId: message.key?.id,
-          error: error instanceof Error ? error.message : "Erro desconhecido",
         });
       }
     }
@@ -544,18 +543,15 @@ export class WhatsAppService {
 
   /**
    * Enviar mensagem de texto
-   * @param tenantId ID do tenant
-   * @param phoneNumber Número do telefone
-   * @param text Texto da mensagem
-   * @returns Resultado do envio
    */
   async sendMessage(
     tenantId: number,
     phoneNumber: string,
-    text: string
+    text: string,
+    options?: SendTextMessageOptions
   ): Promise<any> {
     try {
-      console.log("📤 Iniciando envio de mensagem:", {
+      logger.debug("Iniciando envio de mensagem", {
         tenantId,
         phoneNumber,
         textLength: text.length,
@@ -574,16 +570,22 @@ export class WhatsAppService {
         );
       }
 
+      if (!session.evolutionApiKey) {
+        throw new Error("API Key não configurada para esta sessão");
+      }
+
       // Formatar número de telefone
       const formattedNumber = phoneNumber.replace(/\D/g, "");
 
       const result = await evolutionService.sendTextMessage(
         session.sessionName,
+        session.evolutionApiKey,
         formattedNumber,
-        text
+        text,
+        options
       );
 
-      console.log("✅ Mensagem enviada:", {
+      logger.info("Mensagem enviada", {
         tenantId,
         phoneNumber: formattedNumber,
         messageId: result?.key?.id,
@@ -591,10 +593,9 @@ export class WhatsAppService {
 
       return result;
     } catch (error: any) {
-      console.error("❌ Erro ao enviar mensagem:", {
+      logger.error("Erro ao enviar mensagem", error, {
         tenantId,
         phoneNumber,
-        error: error.message,
       });
       throw error;
     }
@@ -602,12 +603,10 @@ export class WhatsAppService {
 
   /**
    * Obter QR Code manualmente
-   * @param tenantId ID do tenant
-   * @returns QR Code ou null
    */
   async getQRCodeManual(tenantId: number): Promise<string | null> {
     try {
-      console.log("📱 Obtendo QR Code manual para tenant:", tenantId);
+      logger.debug("Obtendo QR Code manual para tenant", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
         where: { tenantId },
@@ -619,12 +618,20 @@ export class WhatsAppService {
 
       // Primeiro tentar obter do banco (se veio via webhook)
       if (session.qrCode) {
-        console.log("✅ QR Code encontrado no banco:", tenantId);
+        logger.debug("QR Code encontrado no banco", { tenantId });
         return session.qrCode;
       }
 
+      if (!session.evolutionApiKey) {
+        logger.warn("Sessão sem API Key configurada", { tenantId });
+        return null;
+      }
+
       // Se não tem no banco, tentar obter da Evolution API
-      const qrCode = await evolutionService.getQRCode(session.sessionName);
+      const qrCode = await evolutionService.getQRCode(
+        session.sessionName,
+        session.evolutionApiKey
+      );
 
       if (qrCode) {
         // Salvar no banco para próximas consultas
@@ -632,30 +639,24 @@ export class WhatsAppService {
           where: { id: session.id },
           data: { qrCode },
         });
-        console.log(
-          "✅ QR Code obtido da Evolution e salvo no banco:",
-          tenantId
-        );
+        logger.debug("QR Code obtido da Evolution e salvo no banco", {
+          tenantId,
+        });
       }
 
       return qrCode;
     } catch (error: any) {
-      console.error("❌ Erro ao obter QR Code:", {
-        tenantId,
-        error: error.message,
-      });
+      logger.error("Erro ao obter QR Code", error, { tenantId });
       return null;
     }
   }
 
   /**
    * Obter configuração do webhook
-   * @param tenantId ID do tenant
-   * @returns Configuração do webhook
    */
   async getWebhookConfig(tenantId: number): Promise<any> {
     try {
-      console.log("🔍 Obtendo configuração do webhook para tenant:", tenantId);
+      logger.debug("Obtendo configuração do webhook para tenant", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
         where: { tenantId },
@@ -665,15 +666,20 @@ export class WhatsAppService {
         throw new Error("Sessão não encontrada no banco de dados");
       }
 
+      if (!session.evolutionApiKey) {
+        logger.warn("Sessão sem API Key configurada", { tenantId });
+        return null;
+      }
+
       const webhookConfig = await evolutionService.getWebhookConfig(
-        session.sessionName
+        session.sessionName,
+        session.evolutionApiKey
       );
 
       return webhookConfig;
     } catch (error: any) {
-      console.error("❌ Erro ao obter configuração do webhook:", {
+      logger.error("Erro ao obter configuração do webhook", error, {
         tenantId,
-        error: error.message,
       });
       return null;
     }
@@ -681,7 +687,6 @@ export class WhatsAppService {
 
   /**
    * Utility para delay
-   * @param ms Milissegundos para aguardar
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

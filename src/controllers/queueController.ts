@@ -6,6 +6,7 @@ import { z } from "zod";
 import { queueService } from "../services/queueService";
 import { createAppError } from "../middlewares/errorHandler";
 import { logger } from "../utils/logger";
+import { prisma } from "@/config/database";
 
 // Schemas de validação
 const enqueueSchema = z.object({

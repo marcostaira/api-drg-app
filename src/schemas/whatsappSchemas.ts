@@ -1,5 +1,5 @@
 // src/schemas/whatsappSchemas.ts
-// Schemas de validação com Zod para WhatsApp API
+// Schemas de validação para WhatsApp com API Key
 
 import { z } from "zod";
 
@@ -9,9 +9,13 @@ export const connectSchema = z.object({
     .number()
     .int()
     .positive("ID do tenant deve ser um número positivo"),
+  evolutionApiKey: z
+    .string()
+    .min(1, "API Key é obrigatória")
+    .max(500, "API Key muito longa"),
 });
 
-// Schema para desconectar sessão
+// Schema para desconectar
 export const disconnectSchema = z.object({
   tenantId: z.coerce
     .number()
@@ -27,16 +31,33 @@ export const sendMessageSchema = z.object({
     .positive("ID do tenant deve ser um número positivo"),
   phoneNumber: z
     .string()
-    .min(10, "Número de telefone deve ter pelo menos 10 dígitos")
-    .max(15, "Número de telefone deve ter no máximo 15 dígitos")
-    .regex(/^\d+$/, "Número de telefone deve conter apenas dígitos"),
+    .min(10, "Número de telefone inválido")
+    .max(20, "Número de telefone muito longo"),
   text: z
     .string()
     .min(1, "Texto da mensagem é obrigatório")
-    .max(4096, "Mensagem muito longa (máximo 4096 caracteres)"),
+    .max(4096, "Texto muito longo"),
+  options: z
+    .object({
+      delay: z.number().min(0).max(60000).optional(),
+      linkPreview: z.boolean().optional(),
+      mentionsEveryOne: z.boolean().optional(),
+      mentioned: z.array(z.string()).optional(),
+      quoted: z
+        .object({
+          key: z.object({
+            id: z.string(),
+          }),
+          message: z.object({
+            conversation: z.string(),
+          }),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
-// Schema para obter status
+// Schema para status
 export const statusSchema = z.object({
   tenantId: z.coerce
     .number()
@@ -44,24 +65,28 @@ export const statusSchema = z.object({
     .positive("ID do tenant deve ser um número positivo"),
 });
 
-// Schema para webhook
-export const webhookSchema = z.object({
+// Schema para webhook data
+export const webhookDataSchema = z.object({
+  event: z.string(),
+  data: z.any().optional(),
+});
+
+// Schema para atualizar API Key
+export const updateApiKeySchema = z.object({
   tenantId: z.coerce
     .number()
     .int()
     .positive("ID do tenant deve ser um número positivo"),
+  evolutionApiKey: z
+    .string()
+    .min(1, "API Key é obrigatória")
+    .max(500, "API Key muito longa"),
 });
 
-// Schema para dados do webhook
-export const webhookDataSchema = z.object({
-  event: z.string().min(1, "Evento é obrigatório"),
-  data: z.any().optional().default({}), // Tornar opcional com valor padrão
-});
-
-// Tipos inferidos dos schemas
+// Tipos TypeScript exportados
 export type ConnectRequest = z.infer<typeof connectSchema>;
 export type DisconnectRequest = z.infer<typeof disconnectSchema>;
 export type SendMessageRequest = z.infer<typeof sendMessageSchema>;
 export type StatusRequest = z.infer<typeof statusSchema>;
-export type WebhookRequest = z.infer<typeof webhookSchema>;
-export type WebhookDataRequest = z.infer<typeof webhookDataSchema>;
+export type WebhookData = z.infer<typeof webhookDataSchema>;
+export type UpdateApiKeyRequest = z.infer<typeof updateApiKeySchema>;

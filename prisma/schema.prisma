@@ -11,6 +11,7 @@ datasource db {
 model WhatsAppSession {
   id         String                   @id @default(uuid())
   tenantId   Int                      @map("tenant_id")
+  evolutionApiKey String?                  @map("evolution_api_key") @db.VarChar(500) // <-- ADICIONAR ESTA LINHA
   sessionName String                  @unique @map("session_name") @db.VarChar(255)
   status     WhatsAppSessionStatus    @default(DISCONNECTED)
   phoneNumber String?                 @map("phone_number") @db.VarChar(255)

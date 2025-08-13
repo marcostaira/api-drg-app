@@ -1,9 +1,10 @@
 // src/controllers/whatsappController.ts
-// Controller WhatsApp com validações melhoradas
+// Controller WhatsApp com validações melhoradas e suporte a API Key
 
 import { Request, Response, NextFunction } from "express";
 import { whatsappService } from "../services/whatsappService";
 import { createAppError } from "../middlewares/errorHandler";
+import { logger } from "../utils/logger";
 import {
   connectSchema,
   disconnectSchema,
@@ -15,6 +16,7 @@ import {
   type SendMessageRequest,
   type StatusRequest,
 } from "../schemas/whatsappSchemas";
+import { prisma } from "@/config/database";
 
 export class WhatsAppController {
   /**
@@ -27,16 +29,24 @@ export class WhatsAppController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log("🚀 Controller: Iniciando conexão", {
-        body: req.body,
+      logger.info("Controller: Iniciando conexão", {
+        body: {
+          ...req.body,
+          evolutionApiKey: req.body.evolutionApiKey ? "[REDACTED]" : undefined,
+        },
         ip: req.ip,
       });
 
-      const { tenantId }: ConnectRequest = connectSchema.parse(req.body);
+      const { tenantId, evolutionApiKey }: ConnectRequest = connectSchema.parse(
+        req.body
+      );
 
-      const result = await whatsappService.connectTenant(tenantId);
+      const result = await whatsappService.connectTenant(
+        tenantId,
+        evolutionApiKey
+      );
 
-      console.log("✅ Controller: Conexão processada", {
+      logger.info("Controller: Conexão processada", {
         tenantId,
         sessionId: result.sessionId,
         status: result.status,
@@ -48,9 +58,8 @@ export class WhatsAppController {
         data: result,
       });
     } catch (error) {
-      console.error("❌ Controller: Erro na conexão", {
-        body: req.body,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+      logger.error("Controller: Erro na conexão", error, {
+        body: { ...req.body, evolutionApiKey: "[REDACTED]" },
       });
       next(error);
     }
@@ -66,7 +75,7 @@ export class WhatsAppController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log("🔌 Controller: Iniciando desconexão", {
+      logger.info("Controller: Iniciando desconexão", {
         body: req.body,
         ip: req.ip,
       });
@@ -75,7 +84,7 @@ export class WhatsAppController {
 
       await whatsappService.disconnectSession(tenantId);
 
-      console.log("✅ Controller: Desconexão processada", { tenantId });
+      logger.info("Controller: Desconexão processada", { tenantId });
 
       res.status(200).json({
         success: true,
@@ -83,9 +92,8 @@ export class WhatsAppController {
         data: { tenantId },
       });
     } catch (error) {
-      console.error("❌ Controller: Erro na desconexão", {
+      logger.error("Controller: Erro na desconexão", error, {
         body: req.body,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
       next(error);
     }
@@ -101,7 +109,7 @@ export class WhatsAppController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log("📊 Controller: Obtendo status", {
+      logger.debug("Controller: Obtendo status", {
         params: req.params,
         ip: req.ip,
       });
@@ -110,7 +118,7 @@ export class WhatsAppController {
 
       const status = await whatsappService.getSessionStatus(tenantId);
 
-      console.log("✅ Controller: Status obtido", {
+      logger.info("Controller: Status obtido", {
         tenantId,
         connected: status.connected,
         status: status.status,
@@ -122,9 +130,8 @@ export class WhatsAppController {
         data: status,
       });
     } catch (error) {
-      console.error("❌ Controller: Erro ao obter status", {
+      logger.error("Controller: Erro ao obter status", error, {
         params: req.params,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
       next(error);
     }
@@ -140,21 +147,22 @@ export class WhatsAppController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log("📤 Controller: Enviando mensagem", {
+      logger.info("Controller: Enviando mensagem", {
         body: { ...req.body, text: `[${req.body?.text?.length || 0} chars]` },
         ip: req.ip,
       });
 
-      const { tenantId, phoneNumber, text }: SendMessageRequest =
+      const { tenantId, phoneNumber, text, options }: SendMessageRequest =
         sendMessageSchema.parse(req.body);
 
       const result = await whatsappService.sendMessage(
         tenantId,
         phoneNumber,
-        text
+        text,
+        options
       );
 
-      console.log("✅ Controller: Mensagem enviada", {
+      logger.info("Controller: Mensagem enviada", {
         tenantId,
         phoneNumber,
         messageId: result?.key?.id,
@@ -171,9 +179,8 @@ export class WhatsAppController {
         },
       });
     } catch (error) {
-      console.error("❌ Controller: Erro ao enviar mensagem", {
+      logger.error("Controller: Erro ao enviar mensagem", error, {
         body: { ...req.body, text: `[${req.body?.text?.length || 0} chars]` },
-        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
       next(error);
     }
@@ -192,9 +199,8 @@ export class WhatsAppController {
       const tenantIdParam = req.params.tenantId;
       const tenantId = parseInt(tenantIdParam);
 
-      console.log("🎣 Controller: Webhook recebido", {
-        tenantId: tenantIdParam,
-        event: req.body?.event,
+      logger.webhook(req.body?.event || "unknown", {
+        tenantId,
         ip: req.ip,
         userAgent: req.get("User-Agent"),
       });
@@ -212,7 +218,7 @@ export class WhatsAppController {
 
       await whatsappService.processWebhook(tenantId, webhookData);
 
-      console.log("✅ Controller: Webhook processado", {
+      logger.info("Controller: Webhook processado", {
         tenantId,
         event: webhookData.event,
       });
@@ -227,11 +233,9 @@ export class WhatsAppController {
         },
       });
     } catch (error) {
-      console.error("❌ Controller: Erro no webhook", {
+      logger.error("Controller: Erro no webhook", error, {
         tenantId: req.params.tenantId,
         event: req.body?.event,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-        body: req.body,
       });
       next(error);
     }
@@ -247,7 +251,7 @@ export class WhatsAppController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log("📱 Controller: Obtendo QR Code", {
+      logger.debug("Controller: Obtendo QR Code", {
         params: req.params,
         ip: req.ip,
       });
@@ -256,7 +260,7 @@ export class WhatsAppController {
 
       const qrCode = await whatsappService.getQRCodeManual(tenantId);
 
-      console.log("✅ Controller: QR Code obtido", {
+      logger.info("Controller: QR Code obtido", {
         tenantId,
         hasQrCode: !!qrCode,
       });
@@ -281,9 +285,8 @@ export class WhatsAppController {
         },
       });
     } catch (error) {
-      console.error("❌ Controller: Erro ao obter QR Code", {
+      logger.error("Controller: Erro ao obter QR Code", error, {
         params: req.params,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
       next(error);
     }
@@ -299,7 +302,7 @@ export class WhatsAppController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log("🎣 Controller: Verificando webhook", {
+      logger.debug("Controller: Verificando webhook", {
         params: req.params,
         ip: req.ip,
       });
@@ -308,7 +311,7 @@ export class WhatsAppController {
 
       const webhookConfig = await whatsappService.getWebhookConfig(tenantId);
 
-      console.log("✅ Controller: Webhook verificado", {
+      logger.info("Controller: Webhook verificado", {
         tenantId,
         hasWebhook: !!webhookConfig,
       });
@@ -323,9 +326,8 @@ export class WhatsAppController {
         },
       });
     } catch (error) {
-      console.error("❌ Controller: Erro ao verificar webhook", {
+      logger.error("Controller: Erro ao verificar webhook", error, {
         params: req.params,
-        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
       next(error);
     }
@@ -337,10 +339,7 @@ export class WhatsAppController {
    */
   async health(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      console.log("💊 Controller: Health check WhatsApp", { ip: req.ip });
-
-      // Verificar se pode conectar com Evolution API (teste básico)
-      // Aqui você poderia fazer uma verificação simples do Evolution
+      logger.debug("Controller: Health check WhatsApp", { ip: req.ip });
 
       res.status(200).json({
         success: true,
@@ -352,8 +351,59 @@ export class WhatsAppController {
         },
       });
     } catch (error) {
-      console.error("❌ Controller: Erro no health check", {
-        error: error instanceof Error ? error.message : "Erro desconhecido",
+      logger.error("Controller: Erro no health check", error);
+      next(error);
+    }
+  }
+
+  /**
+   * Atualizar API Key da sessão
+   * PUT /api/whatsapp/api-key
+   */
+  async updateApiKey(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      logger.info("Controller: Atualizando API Key", {
+        body: { ...req.body, evolutionApiKey: "[REDACTED]" },
+        ip: req.ip,
+      });
+
+      const { tenantId, evolutionApiKey } = req.body;
+
+      if (!tenantId || !evolutionApiKey) {
+        throw createAppError(
+          "TenantId e evolutionApiKey são obrigatórios",
+          400
+        );
+      }
+
+      // Atualizar API Key na sessão existente
+      const session = await prisma.whatsAppSession.findFirst({
+        where: { tenantId },
+      });
+
+      if (!session) {
+        throw createAppError("Sessão não encontrada para este tenant", 404);
+      }
+
+      await prisma.whatsAppSession.update({
+        where: { id: session.id },
+        data: { evolutionApiKey },
+      });
+
+      logger.info("Controller: API Key atualizada", { tenantId });
+
+      res.status(200).json({
+        success: true,
+        message: "API Key atualizada com sucesso",
+        data: { tenantId },
+      });
+    } catch (error) {
+      logger.error("Controller: Erro ao atualizar API Key", error, {
+        body: { ...req.body, evolutionApiKey: "[REDACTED]" },
       });
       next(error);
     }

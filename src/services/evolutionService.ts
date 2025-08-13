@@ -1,8 +1,9 @@
 // src/services/evolutionService.ts
-// Serviço para integração com Evolution API v2 com verificações melhoradas
+// Serviço para integração com Evolution API v2 com API Key por sessão
 
-import axios, { AxiosResponse } from "axios";
+import axios, { AxiosInstance, AxiosError } from "axios";
 import { config } from "../config/config";
+import { logger } from "../utils/logger";
 import type {
   EvolutionInstance,
   EvolutionCreateInstancePayload,
@@ -11,116 +12,105 @@ import type {
   EvolutionSessionStatus,
   EvolutionSessionInfo,
   SendTextMessagePayload,
+  SendTextMessageOptions,
 } from "../types/evolution.types";
 
 export class EvolutionService {
   private baseURL: string;
-  private apiKey: string;
-  private axiosInstance;
 
   constructor() {
     this.baseURL = config.evolutionApiUrl;
-    this.apiKey = config.evolutionApiKey;
+  }
 
-    this.axiosInstance = axios.create({
+  /**
+   * Criar headers com API Key específica
+   */
+  private getHeaders(apiKey: string): Record<string, string> {
+    return {
+      apikey: apiKey,
+      "Content-Type": "application/json",
+    };
+  }
+
+  /**
+   * Criar instância do axios com API Key específica
+   */
+  private createAxiosInstance(apiKey: string): AxiosInstance {
+    return axios.create({
       baseURL: this.baseURL,
-      headers: {
-        apikey: this.apiKey,
-        "Content-Type": "application/json",
-      },
+      headers: this.getHeaders(apiKey),
       timeout: 30000,
     });
   }
 
   /**
    * Verifica se a instância existe no Evolution API
-   * @param instanceName Nome da instância
-   * @returns true se existe, false se não existe
    */
-  async checkSession(instanceName: string): Promise<boolean> {
+  async checkSession(instanceName: string, apiKey: string): Promise<boolean> {
     try {
-      console.log(
-        "🔍 Verificando se instância existe no Evolution:",
-        instanceName
-      );
+      logger.evolution("CHECK_SESSION", instanceName, { checking: true });
 
-      const response = await this.axiosInstance.get(
-        `/instance/${instanceName}`
-      );
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.get(`/instance/${instanceName}`);
 
-      console.log("✅ Instância encontrada no Evolution:", {
+      logger.evolution("SESSION_FOUND", instanceName, {
         status: response.status,
-        instanceName,
-        data: response.data?.instance?.instanceName,
+        instanceStatus: response.data?.instance?.status,
       });
 
       return response.status === 200;
     } catch (error: any) {
-      console.log("❌ Erro ao verificar instância no Evolution:", {
-        status: error.response?.status,
-        instanceName,
-        message: error.response?.data?.message || error.message,
-      });
+      const axiosError = error as AxiosError;
 
-      // Instância não existe (404)
-      if (error.response?.status === 404) {
-        console.log("❌ Instância não existe no Evolution (404)");
+      if (axiosError.response?.status === 404) {
+        logger.evolution("SESSION_NOT_FOUND", instanceName);
         return false;
       }
 
-      // Instância existe mas sem acesso (403)
-      if (error.response?.status === 403) {
-        console.log("⚠️ Instância existe no Evolution mas sem acesso (403)");
-        return true;
+      if (axiosError.response?.status === 403) {
+        logger.evolution("SESSION_FORBIDDEN", instanceName);
+        return true; // Existe mas sem acesso
       }
 
-      // Outros erros consideramos como não existente
-      console.error(
-        "Erro inesperado ao verificar instância:",
-        error.response?.status
-      );
+      logger.evolution("CHECK_SESSION_ERROR", instanceName, undefined, error);
       return false;
     }
   }
 
   /**
    * Obter informações detalhadas da instância
-   * @param instanceName Nome da instância
-   * @returns Informações da instância ou null
    */
   async getSessionInfo(
-    instanceName: string
+    instanceName: string,
+    apiKey: string
   ): Promise<EvolutionSessionInfo | null> {
     try {
-      console.log("📋 Obtendo informações da instância:", instanceName);
+      logger.evolution("GET_SESSION_INFO", instanceName);
 
-      const response = await this.axiosInstance.get(
-        `/instance/${instanceName}`
-      );
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.get(`/instance/${instanceName}`);
 
-      console.log("✅ Informações obtidas:", {
-        instanceName,
-        status: response.data?.instance?.status,
-      });
-
+      logger.evolution("SESSION_INFO_RETRIEVED", instanceName, response.data);
       return response.data;
     } catch (error: any) {
-      console.error("❌ Erro ao obter informações da instância:", {
+      logger.evolution(
+        "GET_SESSION_INFO_ERROR",
         instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+        undefined,
+        error
+      );
       return null;
     }
   }
 
   /**
    * Criar nova instância no Evolution API
-   * @param instanceName Nome da instância
-   * @param webhookUrl URL do webhook (opcional)
-   * @returns Dados da instância criada
    */
-  async createSession(instanceName: string, webhookUrl?: string): Promise<any> {
+  async createSession(
+    instanceName: string,
+    apiKey: string,
+    webhookUrl?: string
+  ): Promise<any> {
     try {
       const payload: EvolutionCreateInstancePayload = {
         instanceName,
@@ -128,126 +118,95 @@ export class EvolutionService {
         qrcode: true,
       };
 
-      console.log("🚀 Criando nova instância no Evolution:", {
-        instanceName,
+      logger.evolution("CREATE_SESSION", instanceName, {
         integration: payload.integration,
       });
 
-      const response = await this.axiosInstance.post(
-        "/instance/create",
-        payload
-      );
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.post("/instance/create", payload);
 
-      console.log("✅ Instância criada no Evolution:", {
-        instanceName,
+      logger.evolution("SESSION_CREATED", instanceName, {
         status: response.status,
       });
 
       return response.data;
     } catch (error: any) {
-      // Se erro 403, instância já existe - não é erro crítico
-      if (error.response?.status === 403) {
-        console.log(
-          "⚠️ Instância já existe no Evolution (403), continuando fluxo..."
-        );
+      const axiosError = error as AxiosError;
+
+      if (axiosError.response?.status === 403) {
+        logger.evolution("SESSION_ALREADY_EXISTS", instanceName);
         return {
           instance: { instanceName, status: "existing" },
           message: "Instance already exists",
         };
       }
 
-      console.error("❌ Erro ao criar instância no Evolution:", {
-        instanceName,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        message:
-          error.response?.data?.response?.message ||
-          error.response?.data?.message,
-        data: error.response?.data,
-      });
-
+      logger.evolution("CREATE_SESSION_ERROR", instanceName, undefined, error);
       throw error;
     }
   }
 
   /**
    * Configurar instância (rejeitar grupos, não sincronizar histórico, etc.)
-   * @param instanceName Nome da instância
    */
-  async configureSession(instanceName: string): Promise<void> {
+  async configureSession(instanceName: string, apiKey: string): Promise<void> {
     try {
       const settings: EvolutionSettings = {
         rejectCall: false,
         msgCall:
           "Não atendemos chamadas por aqui. Por favor, envie uma mensagem.",
-        groupsIgnore: true, // Ignorar mensagens de grupos
+        groupsIgnore: true,
         alwaysOnline: false,
         readMessages: false,
         readStatus: false,
-        syncFullHistory: false, // Não sincronizar histórico
+        syncFullHistory: false,
       };
 
-      console.log("⚙️ Configurando instância:", instanceName);
+      logger.evolution("CONFIGURE_SESSION", instanceName, settings);
 
-      await this.axiosInstance.post(`/settings/set/${instanceName}`, settings);
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      await axiosInstance.post(`/settings/set/${instanceName}`, settings);
 
-      console.log("✅ Instância configurada:", instanceName);
+      logger.evolution("SESSION_CONFIGURED", instanceName);
     } catch (error: any) {
-      console.error("❌ Erro ao configurar instância:", {
+      logger.evolution(
+        "CONFIGURE_SESSION_ERROR",
         instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+        undefined,
+        error
+      );
       throw error;
     }
   }
 
   /**
    * Configurar webhook da instância
-   * @param instanceName Nome da instância
-   * @param webhookUrl URL do webhook
    */
   async configureWebhook(
     instanceName: string,
+    apiKey: string,
     webhookUrl: string
   ): Promise<void> {
     try {
       // Validar URL do webhook
       if (!this.isValidWebhookUrl(webhookUrl)) {
-        console.log("⚠️ URL do webhook pode ser inválida:", webhookUrl);
+        logger.warn("URL do webhook pode ser inválida", { webhookUrl });
       }
 
-      // 1. Primeiro verificar se webhook já está configurado
-      console.log("🔍 Verificando webhook existente:", instanceName);
-      const existingWebhook = await this.getWebhookConfig(instanceName);
+      // Verificar webhook existente
+      const existingWebhook = await this.getWebhookConfig(instanceName, apiKey);
 
       if (
-        existingWebhook &&
-        existingWebhook.webhook &&
-        existingWebhook.webhook.url
+        existingWebhook?.webhook?.url === webhookUrl &&
+        existingWebhook?.webhook?.enabled
       ) {
-        console.log("ℹ️ Webhook já configurado:", {
-          instanceName,
-          currentUrl: existingWebhook.webhook.url,
-          newUrl: webhookUrl,
+        logger.evolution("WEBHOOK_ALREADY_CONFIGURED", instanceName, {
+          webhookUrl,
         });
-
-        // Se a URL é a mesma, não precisa reconfigurar
-        if (
-          existingWebhook.webhook.url === webhookUrl &&
-          existingWebhook.webhook.enabled
-        ) {
-          console.log(
-            "✅ Webhook já está configurado corretamente:",
-            instanceName
-          );
-          return;
-        }
-
-        console.log("🔄 Atualizando webhook com nova URL...");
+        return;
       }
 
-      // 2. Configurar ou atualizar webhook com estrutura correta
+      // Configurar webhook
       const webhookPayload = {
         webhook: {
           enabled: true,
@@ -258,115 +217,89 @@ export class EvolutionService {
         },
       };
 
-      console.log("🎣 Configurando webhook:", {
-        instanceName,
-        webhookUrl,
-        payload: webhookPayload,
-      });
+      logger.evolution("CONFIGURE_WEBHOOK", instanceName, webhookPayload);
 
-      const response = await this.axiosInstance.post(
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.post(
         `/webhook/set/${instanceName}`,
         webhookPayload
       );
 
-      console.log("✅ Webhook configurado:", {
-        instanceName,
-        status: response.status,
-        data: response.data,
-      });
+      logger.evolution("WEBHOOK_CONFIGURED", instanceName, response.data);
 
-      // 3. Verificar se foi configurado corretamente
-      await this.delay(1000); // Aguardar um pouco
-      const verifyWebhook = await this.getWebhookConfig(instanceName);
+      // Verificar configuração
+      await this.delay(1000);
+      const verifyWebhook = await this.getWebhookConfig(instanceName, apiKey);
 
-      if (
-        verifyWebhook &&
-        verifyWebhook.webhook &&
-        verifyWebhook.webhook.url === webhookUrl
-      ) {
-        console.log("✅ Webhook verificado e funcionando:", instanceName);
-      } else {
-        console.log("⚠️ Webhook pode não ter sido configurado corretamente:", {
+      if (verifyWebhook?.webhook?.url !== webhookUrl) {
+        logger.warn("Webhook pode não ter sido configurado corretamente", {
           instanceName,
           expected: webhookUrl,
-          actual: verifyWebhook?.webhook?.url || "não definido",
+          actual: verifyWebhook?.webhook?.url,
         });
       }
     } catch (error: any) {
-      console.error("❌ Erro ao configurar webhook:", {
-        instanceName,
-        webhookUrl,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        message: error.response?.data?.message || error.message,
-        errors:
-          error.response?.data?.response?.message ||
-          error.response?.data?.errors,
-      });
+      const axiosError = error as AxiosError;
 
-      // Se erro 400, pode ser que a URL seja inválida
-      if (error.response?.status === 400) {
-        console.log("⚠️ Erro 400 no webhook - detalhes:", error.response?.data);
-        console.log("⚠️ Tentando continuar sem webhook...");
-        return; // Não falhar o processo todo por causa do webhook
+      if (axiosError.response?.status === 400) {
+        logger.warn("Erro 400 no webhook - continuando sem webhook", {
+          instanceName,
+          webhookUrl,
+        });
+        return;
       }
 
+      logger.evolution(
+        "CONFIGURE_WEBHOOK_ERROR",
+        instanceName,
+        undefined,
+        error
+      );
       throw error;
     }
   }
 
   /**
    * Obter configuração atual do webhook
-   * @param instanceName Nome da instância
-   * @returns Configuração do webhook
    */
-  async getWebhookConfig(instanceName: string): Promise<any> {
+  async getWebhookConfig(instanceName: string, apiKey: string): Promise<any> {
     try {
-      console.log("🔍 Obtendo configuração do webhook:", instanceName);
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.get(`/webhook/find/${instanceName}`);
 
-      const response = await this.axiosInstance.get(
-        `/webhook/find/${instanceName}`
-      );
-
-      console.log("✅ Configuração do webhook obtida:", {
-        instanceName,
-        webhook: response.data,
-      });
-
+      logger.evolution("WEBHOOK_CONFIG_RETRIEVED", instanceName, response.data);
       return response.data;
     } catch (error: any) {
-      // Se retornar 404, significa que não há webhook configurado
-      if (error.response?.status === 404) {
-        console.log("ℹ️ Nenhum webhook configurado para:", instanceName);
+      const axiosError = error as AxiosError;
+
+      if (axiosError.response?.status === 404) {
+        logger.evolution("NO_WEBHOOK_CONFIGURED", instanceName);
         return null;
       }
 
-      console.error("❌ Erro ao obter webhook:", {
+      logger.evolution(
+        "GET_WEBHOOK_CONFIG_ERROR",
         instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+        undefined,
+        error
+      );
       return null;
     }
   }
 
   /**
    * Validar se a URL do webhook é válida
-   * @param webhookUrl URL do webhook
-   * @returns true se válida
    */
   private isValidWebhookUrl(webhookUrl: string): boolean {
     try {
       const url = new URL(webhookUrl);
 
-      // Verificar se não é localhost quando em produção
       if (
-        process.env.NODE_ENV === "production" &&
+        config.nodeEnv === "production" &&
         (url.hostname === "localhost" || url.hostname === "127.0.0.1")
       ) {
-        console.log(
-          "⚠️ Usando localhost em produção pode causar problemas no webhook"
+        logger.warn(
+          "Usando localhost em produção pode causar problemas no webhook"
         );
         return false;
       }
@@ -379,216 +312,195 @@ export class EvolutionService {
 
   /**
    * Obter status da conexão da instância
-   * @param instanceName Nome da instância
-   * @returns Status da conexão
    */
   async getSessionStatus(
-    instanceName: string
+    instanceName: string,
+    apiKey: string
   ): Promise<EvolutionSessionStatus | null> {
     try {
-      console.log("📊 Obtendo status da conexão:", instanceName);
-
-      const response = await this.axiosInstance.get(
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.get(
         `/instance/connectionState/${instanceName}`
       );
 
-      console.log("✅ Status obtido:", {
-        instanceName,
+      logger.evolution("SESSION_STATUS_RETRIEVED", instanceName, {
         state: response.data?.state,
       });
 
       return response.data;
     } catch (error: any) {
-      console.error("❌ Erro ao obter status da conexão:", {
+      logger.evolution(
+        "GET_SESSION_STATUS_ERROR",
         instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+        undefined,
+        error
+      );
       return null;
     }
   }
 
   /**
    * Desconectar instância
-   * @param instanceName Nome da instância
    */
-  async disconnectSession(instanceName: string): Promise<void> {
+  async disconnectSession(instanceName: string, apiKey: string): Promise<void> {
     try {
-      console.log("🔌 Desconectando instância:", instanceName);
+      logger.evolution("DISCONNECT_SESSION", instanceName);
 
-      await this.axiosInstance.delete(`/instance/logout/${instanceName}`);
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      await axiosInstance.delete(`/instance/logout/${instanceName}`);
 
-      console.log("✅ Instância desconectada:", instanceName);
+      logger.evolution("SESSION_DISCONNECTED", instanceName);
     } catch (error: any) {
-      console.error("❌ Erro ao desconectar instância:", {
+      logger.evolution(
+        "DISCONNECT_SESSION_ERROR",
         instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+        undefined,
+        error
+      );
       throw error;
     }
   }
 
   /**
    * Deletar instância
-   * @param instanceName Nome da instância
    */
-  async deleteSession(instanceName: string): Promise<void> {
+  async deleteSession(instanceName: string, apiKey: string): Promise<void> {
     try {
-      console.log("🗑️ Deletando instância:", instanceName);
+      logger.evolution("DELETE_SESSION", instanceName);
 
-      await this.axiosInstance.delete(`/instance/delete/${instanceName}`);
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      await axiosInstance.delete(`/instance/delete/${instanceName}`);
 
-      console.log("✅ Instância deletada:", instanceName);
+      logger.evolution("SESSION_DELETED", instanceName);
     } catch (error: any) {
-      console.error("❌ Erro ao deletar instância:", {
-        instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+      logger.evolution("DELETE_SESSION_ERROR", instanceName, undefined, error);
       throw error;
     }
   }
 
   /**
-   * Enviar mensagem de texto
-   * @param instanceName Nome da instância
-   * @param phoneNumber Número do telefone
-   * @param text Texto da mensagem
-   * @returns Resultado do envio
+   * Enviar mensagem de texto com opções completas
    */
   async sendTextMessage(
     instanceName: string,
+    apiKey: string,
     phoneNumber: string,
-    text: string
+    text: string,
+    options?: SendTextMessageOptions
   ): Promise<any> {
     try {
       const payload: SendTextMessagePayload = {
         number: phoneNumber,
         text: text,
+        delay: options?.delay || 0,
+        linkPreview: options?.linkPreview || false,
+        mentionsEveryOne: options?.mentionsEveryOne || false,
+        mentioned: options?.mentioned || [],
+        quoted: options?.quoted,
       };
 
-      console.log("📤 Enviando mensagem:", {
-        instanceName,
+      logger.evolution("SEND_TEXT_MESSAGE", instanceName, {
         phoneNumber,
-        textLength: text.length,
+        hasOptions: !!options,
       });
 
-      const response = await this.axiosInstance.post(
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.post(
         `/message/sendText/${instanceName}`,
         payload
       );
 
-      console.log("✅ Mensagem enviada:", {
-        instanceName,
-        phoneNumber,
-        messageId: response.data?.key?.id,
+      logger.evolution("MESSAGE_SENT", instanceName, {
+        messageId: response.data?.id,
       });
 
       return response.data;
     } catch (error: any) {
-      console.error("❌ Erro ao enviar mensagem:", {
+      logger.evolution(
+        "SEND_MESSAGE_ERROR",
         instanceName,
-        phoneNumber,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+        { phoneNumber },
+        error
+      );
       throw error;
     }
   }
 
   /**
    * Forçar geração de QR Code (conectar instância)
-   * @param instanceName Nome da instância
-   * @returns QR Code ou null
    */
-  async forceQRCode(instanceName: string): Promise<string | null> {
+  async forceQRCode(
+    instanceName: string,
+    apiKey: string
+  ): Promise<string | null> {
     try {
-      console.log("🔄 Forçando geração de QR Code:", instanceName);
+      logger.evolution("FORCE_QR_CODE", instanceName);
 
-      const response = await this.axiosInstance.get(
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.get(
         `/instance/connect/${instanceName}`
       );
 
       const qrCode =
         response.data?.qrcode?.base64 || response.data?.qrCode || null;
 
-      console.log("✅ QR Code forçado:", {
-        instanceName,
-        hasQrCode: !!qrCode,
-        responseKeys: Object.keys(response.data || {}),
-      });
-
+      logger.evolution("QR_CODE_FORCED", instanceName, { hasQrCode: !!qrCode });
       return qrCode;
     } catch (error: any) {
-      console.error("❌ Erro ao forçar QR Code:", {
-        instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+      logger.evolution("FORCE_QR_CODE_ERROR", instanceName, undefined, error);
       return null;
     }
   }
 
   /**
    * Obter QR Code da instância
-   * @param instanceName Nome da instância
-   * @returns QR Code em base64 ou null
    */
-  async getQRCode(instanceName: string): Promise<string | null> {
+  async getQRCode(
+    instanceName: string,
+    apiKey: string
+  ): Promise<string | null> {
     try {
-      console.log("📱 Obtendo QR Code:", instanceName);
-
-      const response = await this.axiosInstance.get(
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      const response = await axiosInstance.get(
         `/instance/connect/${instanceName}`
       );
 
       const qrCode = response.data?.qrcode?.base64 || null;
 
-      console.log("✅ QR Code obtido:", {
-        instanceName,
+      logger.evolution("QR_CODE_RETRIEVED", instanceName, {
         hasQrCode: !!qrCode,
       });
-
       return qrCode;
     } catch (error: any) {
-      console.error("❌ Erro ao obter QR Code:", {
-        instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+      logger.evolution("GET_QR_CODE_ERROR", instanceName, undefined, error);
       return null;
     }
   }
 
   /**
    * Remover configuração do webhook
-   * @param instanceName Nome da instância
    */
-  async removeWebhook(instanceName: string): Promise<void> {
+  async removeWebhook(instanceName: string, apiKey: string): Promise<void> {
     try {
-      console.log("🗑️ Removendo webhook:", instanceName);
+      logger.evolution("REMOVE_WEBHOOK", instanceName);
 
-      await this.axiosInstance.delete(`/webhook/set/${instanceName}`);
+      const axiosInstance = this.createAxiosInstance(apiKey);
+      await axiosInstance.delete(`/webhook/set/${instanceName}`);
 
-      console.log("✅ Webhook removido:", instanceName);
+      logger.evolution("WEBHOOK_REMOVED", instanceName);
     } catch (error: any) {
-      console.error("❌ Erro ao remover webhook:", {
-        instanceName,
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+      logger.evolution("REMOVE_WEBHOOK_ERROR", instanceName, undefined, error);
       // Não falhar se não conseguir remover
     }
   }
 
   /**
    * Utility para delay
-   * @param ms Milissegundos para aguardar
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
+// Exportar como singleton sem API key (será passada em cada método)
 export const evolutionService = new EvolutionService();

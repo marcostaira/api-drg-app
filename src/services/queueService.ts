@@ -16,6 +16,7 @@ import {
   EnqueueMessageRequest,
   ProcessedMessage,
 } from "../types/queue.types";
+import { Prisma } from "@prisma/client";
 
 export class QueueService {
   /**
@@ -270,9 +271,7 @@ export class QueueService {
 
     await prisma.$executeRaw`
       UPDATE wa_queue 
-      SET status = ${status}${
-      sentAt ? prisma.Prisma.sql`${sentAt}` : prisma.Prisma.empty
-    }
+      SET status = ${status}${sentAt ? Prisma.sql`${sentAt}` : Prisma.empty}
       WHERE id = ${queueId}
     `;
   }
