@@ -15,6 +15,8 @@ import type {
   MessageData,
 } from "../types/whatsapp.types";
 import type { SendTextMessageOptions } from "../types/evolution.types";
+import { incomingMessageHandler } from "./incomingMessageHandler";
+import { formatPhoneForWhatsApp } from "../utils/formatters";
 
 export class WhatsAppService {
   /**
@@ -625,7 +627,7 @@ export class WhatsAppService {
   /**
    * Processar mensagem recebida (apenas texto)
    */
-  private async handleMessageReceived(
+  /*private async handleMessageReceived(
     sessionId: string,
     data: MessageData
   ): Promise<void> {
@@ -682,7 +684,7 @@ export class WhatsAppService {
         });
       }
     }
-  }
+  }*/
 
   /**
    * Enviar mensagem de texto - CORRIGIDO para buscar qualquer sessão ativa
@@ -901,6 +903,99 @@ export class WhatsAppService {
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Processar mensagem recebida - NOVO MÉTODO
+   */
+  private async handleMessageReceived(
+    sessionId: string,
+    data: MessageData
+  ): Promise<void> {
+    const messages = data.messages || [data];
+
+    for (const message of messages) {
+      try {
+        // Ignorar mensagens que não são de texto
+        if (message.messageType !== "textMessage") {
+          continue;
+        }
+
+        // Ignorar mensagens enviadas por nós
+        if (message.key?.fromMe) {
+          continue;
+        }
+
+        // Ignorar mensagens de grupos
+        if (message.key?.remoteJid?.includes("@g.us")) {
+          continue;
+        }
+
+        const messageText =
+          message.message?.conversation ||
+          message.message?.extendedTextMessage?.text ||
+          "";
+
+        if (!messageText.trim()) {
+          continue;
+        }
+
+        // Extrair dados da sessão para obter ownerId
+        const session = await prisma.whatsAppSession.findUnique({
+          where: { id: sessionId },
+        });
+
+        if (!session) {
+          logger.warn("Sessão não encontrada para mensagem recebida", {
+            sessionId,
+          });
+          continue;
+        }
+
+        const ownerId = parseInt(session.tenantId);
+        const senderNumber =
+          message.key?.remoteJid?.replace("@s.whatsapp.net", "") || "";
+        const messageId = message.key?.id || `${Date.now()}`;
+        const timestamp = new Date(
+          (message.messageTimestamp || Date.now()) * 1000
+        );
+
+        // Salvar mensagem no banco (ReceivedMessage)
+        await prisma.receivedMessage.create({
+          data: {
+            whatsappSessionId: sessionId,
+            messageId,
+            fromPhone: senderNumber,
+            fromName: message.pushName || null,
+            messageText,
+            messageType: "text",
+            timestamp,
+          },
+        });
+
+        // Processar mensagem com o handler
+        const result = await incomingMessageHandler.handleMessage({
+          ownerId,
+          senderNumber,
+          messageText,
+          messageId,
+          timestamp,
+        });
+
+        logger.info("Mensagem processada pelo handler", {
+          sessionId,
+          ownerId,
+          senderNumber,
+          action: result.action,
+          success: result.success,
+        });
+      } catch (error) {
+        logger.error("Erro ao processar mensagem individual", error, {
+          sessionId,
+          messageId: message.key?.id,
+        });
+      }
+    }
   }
 }
 
