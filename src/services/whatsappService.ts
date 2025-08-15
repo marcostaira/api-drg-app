@@ -17,6 +17,7 @@ import type {
 import type { SendTextMessageOptions } from "../types/evolution.types";
 import { incomingMessageHandler } from "./incomingMessageHandler";
 import { formatPhoneForWhatsApp } from "../utils/formatters";
+import type { EvolutionWebhookData } from "../schemas/whatsappSchemas";
 
 export class WhatsAppService {
   /**
@@ -108,7 +109,7 @@ export class WhatsAppService {
         status: session.status,
         qrCode: qrCode ?? undefined,
         webhookUrl,
-        sessionToken: sessionToken ?? undefined, // CORRIGIDO: converter null para undefined
+        sessionToken: sessionToken ?? undefined,
         evolutionApiKey,
       };
     } catch (error: any) {
@@ -171,7 +172,7 @@ export class WhatsAppService {
     try {
       // Verificar se já existe (usando String)
       const existingTenant = await prisma.tenant.findUnique({
-        where: { id: tenantId.toString() }, // Converter para String
+        where: { id: tenantId.toString() },
       });
 
       if (existingTenant) {
@@ -182,7 +183,7 @@ export class WhatsAppService {
       // Criar tenant na tabela tenants (usando String)
       const tenant = await prisma.tenant.create({
         data: {
-          id: tenantId.toString(), // Converter para String
+          id: tenantId.toString(),
           name:
             client.clientName || client.friendlyName || `Tenant ${tenantId}`,
           active: client.active || true,
@@ -215,7 +216,7 @@ export class WhatsAppService {
 
     const session = await prisma.whatsAppSession.findFirst({
       where: {
-        tenantId: tenantId.toString(), // Converter para String
+        tenantId: tenantId.toString(),
         status: { in: ["CONNECTING", "CONNECTED"] },
       },
     });
@@ -269,7 +270,6 @@ export class WhatsAppService {
           sessionName,
           error: webhookError.message,
         });
-        // Não falhar o processo todo por causa do webhook
       }
 
       logger.info("Sessão criada e configurada no Evolution", { sessionName });
@@ -298,7 +298,7 @@ export class WhatsAppService {
     const session = await prisma.whatsAppSession.upsert({
       where: { sessionName },
       create: {
-        tenantId: tenantId.toString(), // Converter para String
+        tenantId: tenantId.toString(),
         sessionName,
         evolutionApiKey,
         status: "CONNECTING",
@@ -400,7 +400,7 @@ export class WhatsAppService {
       logger.info("Iniciando desconexão", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
-        where: { tenantId: tenantId.toString() }, // Converter para String
+        where: { tenantId: tenantId.toString() },
       });
 
       if (!session) {
@@ -445,7 +445,7 @@ export class WhatsAppService {
       logger.debug("Obtendo status da sessão", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
-        where: { tenantId: tenantId.toString() }, // Converter para String
+        where: { tenantId: tenantId.toString() },
       });
 
       if (!session) {
@@ -501,7 +501,7 @@ export class WhatsAppService {
         phoneNumber: session.phoneNumber ?? undefined,
         profileName: session.profileName ?? undefined,
         sessionName: session.sessionName,
-        sessionToken: session.sessionToken ?? sessionInfo?.token ?? undefined, // CORRIGIDO
+        sessionToken: session.sessionToken ?? sessionInfo?.token ?? undefined,
         connectedAt: session.connectedAt ?? undefined,
         evolutionStatus: evolutionStatus?.state,
         connectionStatus: sessionInfo?.connectionStatus,
@@ -520,46 +520,68 @@ export class WhatsAppService {
   }
 
   /**
-   * Processar webhook do Evolution (usando String)
+   * Processar webhook do Evolution API - COM LOGS DETALHADOS
    */
-  async processWebhook(
+  async processEvolutionWebhook(
     tenantId: number,
-    webhookData: WebhookData
+    webhookData: EvolutionWebhookData
   ): Promise<void> {
     try {
-      logger.webhook(webhookData.event, webhookData.data);
+      logger.info("🎣 EVOLUTION - Processando webhook", {
+        tenantId,
+        event: webhookData.event,
+        instance: webhookData.instance,
+        hasData: !!webhookData.data,
+      });
 
       const session = await prisma.whatsAppSession.findFirst({
-        where: { tenantId: tenantId.toString() }, // Converter para String
+        where: { tenantId: tenantId.toString() },
       });
 
       if (!session) {
-        logger.warn("Sessão não encontrada para webhook", { tenantId });
+        logger.warn("❌ EVOLUTION - Sessão não encontrada", { tenantId });
         return;
       }
 
-      const { event, data = {} } = webhookData;
+      logger.info("✅ EVOLUTION - Sessão encontrada", {
+        sessionId: session.id,
+        sessionName: session.sessionName,
+        status: session.status,
+      });
+
+      const { event, data } = webhookData;
 
       switch (event) {
         case "qrcode.updated":
-          await this.handleQRCodeUpdate(session.id, data);
+          logger.info("📱 EVOLUTION - Processando QR Code update");
+          await this.handleEvolutionQRCodeUpdate(session.id, data);
           break;
 
         case "connection.update":
-          await this.handleConnectionUpdate(session.id, data);
+          logger.info("🔗 EVOLUTION - Processando connection update");
+          await this.handleEvolutionConnectionUpdate(session.id, data);
           break;
 
         case "messages.upsert":
-          await this.handleMessageReceived(session.id, data);
+          logger.info("💬 EVOLUTION - Processando message upsert", {
+            hasKey: !!data.key,
+            hasMessage: !!data.message,
+            messageType: data.messageType,
+            fromMe: data.key?.fromMe,
+          });
+          await this.handleEvolutionMessageReceived(session.id, tenantId, data);
           break;
 
         default:
-          logger.debug("Evento não tratado", { event });
+          logger.debug("❓ EVOLUTION - Evento não tratado", { event });
       }
 
-      logger.debug("Webhook processado", { tenantId, event });
+      logger.info("✅ EVOLUTION - Webhook processado com sucesso", {
+        tenantId,
+        event,
+      });
     } catch (error: any) {
-      logger.error("Erro ao processar webhook", error, {
+      logger.error("❌ EVOLUTION - Erro ao processar webhook", error, {
         tenantId,
         event: webhookData.event,
       });
@@ -567,124 +589,213 @@ export class WhatsAppService {
   }
 
   /**
-   * Processar atualização de QR Code
+   * Processar QR Code do Evolution
    */
-  private async handleQRCodeUpdate(
+  private async handleEvolutionQRCodeUpdate(
     sessionId: string,
-    data: QRCodeData
+    data: any
   ): Promise<void> {
-    if (data.qrCode) {
+    try {
+      if (data.qrcode?.base64) {
+        await prisma.whatsAppSession.update({
+          where: { id: sessionId },
+          data: { qrCode: data.qrcode.base64 },
+        });
+        logger.info("QR Code Evolution atualizado", { sessionId });
+      }
+    } catch (error) {
+      logger.error("Erro ao processar QR Code Evolution", error, { sessionId });
+    }
+  }
+
+  /**
+   * Processar atualização de conexão do Evolution
+   */
+  private async handleEvolutionConnectionUpdate(
+    sessionId: string,
+    data: any
+  ): Promise<void> {
+    try {
+      let status: WhatsAppSessionStatus = "DISCONNECTED";
+      let phoneNumber: string | null = null;
+      let profileName: string | null = null;
+      let connectedAt: Date | null = null;
+
+      switch (data.state) {
+        case "open":
+          status = "CONNECTED";
+          phoneNumber = data.user?.id || null;
+          profileName = data.user?.name || null;
+          connectedAt = new Date();
+          logger.info("Evolution - Conexão estabelecida", { sessionId });
+          break;
+        case "connecting":
+          status = "CONNECTING";
+          logger.debug("Evolution - Conectando", { sessionId });
+          break;
+        case "close":
+          status = "DISCONNECTED";
+          logger.info("Evolution - Conexão fechada", { sessionId });
+          break;
+      }
+
       await prisma.whatsAppSession.update({
         where: { id: sessionId },
-        data: { qrCode: data.qrCode },
+        data: {
+          status,
+          phoneNumber,
+          profileName,
+          connectedAt,
+          qrCode: status === "CONNECTED" ? null : undefined,
+        },
       });
-      logger.debug("QR Code atualizado via webhook", { sessionId });
-    }
-  }
 
-  /**
-   * Processar atualização de conexão
-   */
-  private async handleConnectionUpdate(
-    sessionId: string,
-    data: ConnectionUpdateData
-  ): Promise<void> {
-    let status: WhatsAppSessionStatus = "DISCONNECTED";
-    let phoneNumber: string | null = null;
-    let profileName: string | null = null;
-    let connectedAt: Date | null = null;
-
-    switch (data.state) {
-      case "open":
-        status = "CONNECTED";
-        phoneNumber = data.user?.id || null;
-        profileName = data.user?.name || null;
-        connectedAt = new Date();
-        logger.info("Conexão estabelecida via webhook", { sessionId });
-        break;
-      case "connecting":
-        status = "CONNECTING";
-        logger.debug("Conectando via webhook", { sessionId });
-        break;
-      case "close":
-        status = "DISCONNECTED";
-        logger.info("Conexão fechada via webhook", { sessionId });
-        break;
-    }
-
-    await prisma.whatsAppSession.update({
-      where: { id: sessionId },
-      data: {
+      logger.info("Status Evolution atualizado", {
+        sessionId,
         status,
         phoneNumber,
-        profileName,
-        connectedAt,
-        qrCode: status === "CONNECTED" ? null : undefined,
-      },
-    });
+      });
+    } catch (error) {
+      logger.error("Erro ao processar conexão Evolution", error, { sessionId });
+    }
   }
 
   /**
-   * Processar mensagem recebida (apenas texto)
+   * Processar mensagem recebida do Evolution - COM LOGS DETALHADOS
    */
-  /*private async handleMessageReceived(
+  private async handleEvolutionMessageReceived(
     sessionId: string,
-    data: MessageData
+    tenantId: number,
+    data: any
   ): Promise<void> {
-    const messages = data.messages || [data];
+    try {
+      logger.info("📨 EVOLUTION - Iniciando processamento de mensagem", {
+        sessionId,
+        tenantId,
+        hasKey: !!data.key,
+        hasMessage: !!data.message,
+        messageType: data.messageType,
+      });
 
-    for (const message of messages) {
-      try {
-        // Ignorar mensagens que não são de texto
-        if (message.messageType !== "textMessage") {
-          continue;
-        }
-
-        // Ignorar mensagens enviadas por nós
-        if (message.key?.fromMe) {
-          continue;
-        }
-
-        // Ignorar mensagens de grupos
-        if (message.key?.remoteJid?.includes("@g.us")) {
-          continue;
-        }
-
-        const messageText =
-          message.message?.conversation ||
-          message.message?.extendedTextMessage?.text ||
-          "";
-
-        if (!messageText.trim()) {
-          continue;
-        }
-
-        await prisma.receivedMessage.create({
-          data: {
-            whatsappSessionId: sessionId,
-            messageId: message.key?.id || `${Date.now()}`,
-            fromPhone:
-              message.key?.remoteJid?.replace("@s.whatsapp.net", "") || "",
-            fromName: message.pushName || null,
-            messageText,
-            messageType: "text",
-            timestamp: new Date(message.messageTimestamp * 1000),
-          },
-        });
-
-        logger.debug("Mensagem salva via webhook", {
+      // Verificar se tem os dados necessários
+      if (!data.key || !data.message) {
+        logger.warn("⚠️ EVOLUTION - Webhook sem dados de mensagem válidos", {
           sessionId,
-          fromPhone: message.key?.remoteJid?.replace("@s.whatsapp.net", ""),
-          messageLength: messageText.length,
+          hasKey: !!data.key,
+          hasMessage: !!data.message,
         });
-      } catch (error) {
-        logger.error("Erro ao salvar mensagem recebida", error, {
-          sessionId,
-          messageId: message.key?.id,
-        });
+        return;
       }
+
+      // Ignorar mensagens enviadas por nós
+      if (data.key.fromMe) {
+        logger.debug("👤 EVOLUTION - Ignorando mensagem enviada por nós", {
+          sessionId,
+        });
+        return;
+      }
+
+      // Ignorar mensagens de grupos
+      if (data.key.remoteJid?.includes("@g.us")) {
+        logger.debug("👥 EVOLUTION - Ignorando mensagem de grupo", {
+          sessionId,
+        });
+        return;
+      }
+
+      // Extrair texto da mensagem
+      let messageText = "";
+
+      if (data.message.conversation) {
+        messageText = data.message.conversation;
+        logger.info("💬 EVOLUTION - Texto da mensagem via conversation", {
+          messageText: `"${messageText}"`,
+        });
+      } else if (data.message.extendedTextMessage?.text) {
+        messageText = data.message.extendedTextMessage.text;
+        logger.info(
+          "💬 EVOLUTION - Texto da mensagem via extendedTextMessage",
+          {
+            messageText: `"${messageText}"`,
+          }
+        );
+      }
+
+      if (!messageText.trim()) {
+        logger.warn("⚠️ EVOLUTION - Mensagem sem texto válido", {
+          sessionId,
+          messageText: `"${messageText}"`,
+        });
+        return;
+      }
+
+      // Extrair dados do remetente
+      const senderNumber =
+        data.key.remoteJid?.replace("@s.whatsapp.net", "") || "";
+      const messageId = data.key.id || `${Date.now()}`;
+      const timestamp = new Date(data.messageTimestamp * 1000);
+      const senderName = data.pushName || null;
+
+      logger.info("📋 EVOLUTION - Dados extraídos da mensagem", {
+        sessionId,
+        tenantId,
+        senderNumber,
+        senderName,
+        messageText: `"${messageText}"`,
+        messageLength: messageText.length,
+        messageId,
+        timestamp,
+      });
+
+      // Salvar mensagem no banco (ReceivedMessage)
+      logger.info("💾 EVOLUTION - Salvando mensagem no banco");
+      await prisma.receivedMessage.create({
+        data: {
+          whatsappSessionId: sessionId,
+          messageId,
+          fromPhone: senderNumber,
+          fromName: senderName,
+          messageText,
+          messageType: "text",
+          timestamp,
+        },
+      });
+      logger.info("✅ EVOLUTION - Mensagem salva no banco");
+
+      // Processar mensagem com o handler
+      logger.info("🚀 EVOLUTION - Enviando para handler", {
+        ownerId: tenantId,
+        senderNumber,
+        messageText: `"${messageText}"`,
+        messageId,
+      });
+
+      const result = await incomingMessageHandler.handleMessage({
+        ownerId: tenantId,
+        senderNumber,
+        messageText,
+        messageId,
+        timestamp,
+      });
+
+      logger.info("🎉 EVOLUTION - Resultado do handler", {
+        sessionId,
+        tenantId,
+        senderNumber,
+        action: result.action,
+        success: result.success,
+        message: result.message,
+        statusUpdated: result.statusUpdated,
+        templateSent: result.templateSent,
+      });
+    } catch (error) {
+      logger.error("❌ EVOLUTION - Erro ao processar mensagem", error, {
+        sessionId,
+        tenantId,
+        messageId: data.key?.id,
+      });
     }
-  }*/
+  }
 
   /**
    * Enviar mensagem de texto - CORRIGIDO para buscar qualquer sessão ativa
@@ -706,14 +817,14 @@ export class WhatsAppService {
       const session = await prisma.whatsAppSession.findFirst({
         where: {
           tenantId: tenantId.toString(),
-          status: { in: ["CONNECTED", "CONNECTING"] }, // Aceitar CONNECTING também
+          status: { in: ["CONNECTED", "CONNECTING"] },
         },
         orderBy: [
           {
-            status: "asc", // CONNECTED vem antes de CONNECTING
+            status: "asc",
           },
           {
-            connectedAt: "desc", // Mais recente primeiro
+            connectedAt: "desc",
           },
         ],
       });
@@ -770,7 +881,7 @@ export class WhatsAppService {
       logger.debug("Obtendo QR Code manual para tenant", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
-        where: { tenantId: tenantId.toString() }, // Converter para String
+        where: { tenantId: tenantId.toString() },
       });
 
       if (!session) {
@@ -820,7 +931,7 @@ export class WhatsAppService {
       logger.debug("Obtendo configuração do webhook para tenant", { tenantId });
 
       const session = await prisma.whatsAppSession.findFirst({
-        where: { tenantId: tenantId.toString() }, // Converter para String
+        where: { tenantId: tenantId.toString() },
       });
 
       if (!session) {
@@ -899,14 +1010,87 @@ export class WhatsAppService {
   }
 
   /**
-   * Utility para delay
+   * Processar webhook do Evolution (ANTIGO - manter para compatibilidade)
    */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  async processWebhook(
+    tenantId: number,
+    webhookData: WebhookData
+  ): Promise<void> {
+    // Converter formato antigo para novo
+    const evolutionData: EvolutionWebhookData = {
+      event: webhookData.event,
+      instance: `tenant_${tenantId}`,
+      data: webhookData.data || {},
+      destination: "",
+      date_time: new Date().toISOString(),
+      sender: "",
+      server_url: "",
+      apikey: "",
+    };
+
+    return this.processEvolutionWebhook(tenantId, evolutionData);
   }
 
   /**
-   * Processar mensagem recebida - NOVO MÉTODO
+   * Processar atualização de QR Code (ANTIGO - manter para compatibilidade)
+   */
+  private async handleQRCodeUpdate(
+    sessionId: string,
+    data: QRCodeData
+  ): Promise<void> {
+    if (data.qrCode) {
+      await prisma.whatsAppSession.update({
+        where: { id: sessionId },
+        data: { qrCode: data.qrCode },
+      });
+      logger.debug("QR Code atualizado via webhook", { sessionId });
+    }
+  }
+
+  /**
+   * Processar atualização de conexão (ANTIGO - manter para compatibilidade)
+   */
+  private async handleConnectionUpdate(
+    sessionId: string,
+    data: ConnectionUpdateData
+  ): Promise<void> {
+    let status: WhatsAppSessionStatus = "DISCONNECTED";
+    let phoneNumber: string | null = null;
+    let profileName: string | null = null;
+    let connectedAt: Date | null = null;
+
+    switch (data.state) {
+      case "open":
+        status = "CONNECTED";
+        phoneNumber = data.user?.id || null;
+        profileName = data.user?.name || null;
+        connectedAt = new Date();
+        logger.info("Conexão estabelecida via webhook", { sessionId });
+        break;
+      case "connecting":
+        status = "CONNECTING";
+        logger.debug("Conectando via webhook", { sessionId });
+        break;
+      case "close":
+        status = "DISCONNECTED";
+        logger.info("Conexão fechada via webhook", { sessionId });
+        break;
+    }
+
+    await prisma.whatsAppSession.update({
+      where: { id: sessionId },
+      data: {
+        status,
+        phoneNumber,
+        profileName,
+        connectedAt,
+        qrCode: status === "CONNECTED" ? null : undefined,
+      },
+    });
+  }
+
+  /**
+   * Processar mensagem recebida (ANTIGO - manter para compatibilidade)
    */
   private async handleMessageReceived(
     sessionId: string,
@@ -996,6 +1180,13 @@ export class WhatsAppService {
         });
       }
     }
+  }
+
+  /**
+   * Utility para delay
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

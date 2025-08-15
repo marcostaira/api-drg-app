@@ -1,5 +1,5 @@
 // src/schemas/whatsappSchemas.ts
-// Schemas de validação para WhatsApp - API Key opcional
+// Schemas de validação para WhatsApp - CORRIGIDO com exports corretos
 
 import { z } from "zod";
 
@@ -61,15 +61,72 @@ export const statusSchema = z.object({
     .positive("ID do tenant deve ser um número positivo"),
 });
 
-// Schema para webhook data
+// NOVO: Schema completo para webhook do Evolution API
+export const evolutionWebhookSchema = z.object({
+  event: z.string(),
+  instance: z.string(),
+  data: z.object({
+    // Para mensagens
+    key: z
+      .object({
+        remoteJid: z.string(),
+        fromMe: z.boolean(),
+        id: z.string(),
+      })
+      .optional(),
+    pushName: z.string().optional(),
+    status: z.string().optional(),
+    message: z
+      .object({
+        conversation: z.string().optional(),
+        extendedTextMessage: z
+          .object({
+            text: z.string(),
+          })
+          .optional(),
+        messageContextInfo: z.any().optional(),
+      })
+      .optional(),
+    messageType: z.string().optional(),
+    messageTimestamp: z.number().optional(),
+    instanceId: z.string().optional(),
+    source: z.string().optional(),
+
+    // Para QR Code
+    qrcode: z
+      .object({
+        base64: z.string(),
+        code: z.string(),
+      })
+      .optional(),
+
+    // Para connection update
+    state: z.enum(["open", "connecting", "close"]).optional(),
+    statusReason: z.number().optional(),
+    user: z
+      .object({
+        id: z.string(),
+        name: z.string(),
+      })
+      .optional(),
+  }),
+  destination: z.string(),
+  date_time: z.string(),
+  sender: z.string(),
+  server_url: z.string(),
+  apikey: z.string(),
+});
+
+// Schema antigo para compatibilidade
 export const webhookDataSchema = z.object({
   event: z.string(),
   data: z.any().optional(),
 });
 
-// Tipos TypeScript exportados
+// TIPOS EXPORTADOS - IMPORTANTE!
 export type ConnectRequest = z.infer<typeof connectSchema>;
 export type DisconnectRequest = z.infer<typeof disconnectSchema>;
 export type SendMessageRequest = z.infer<typeof sendMessageSchema>;
 export type StatusRequest = z.infer<typeof statusSchema>;
+export type EvolutionWebhookData = z.infer<typeof evolutionWebhookSchema>; // ← EXPORT CORRETO
 export type WebhookData = z.infer<typeof webhookDataSchema>;

@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import {
   connectSchema,
   disconnectSchema,
+  evolutionWebhookSchema,
   sendMessageSchema,
   statusSchema,
   webhookDataSchema,
@@ -183,62 +184,6 @@ export class WhatsAppController {
   }
 
   /**
-
-  * Webhook para receber dados do Evolution
-  * POST /api/webhook/whatsapp/:tenantId
-  */
-  async webhook(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> {
-    try {
-      const tenantIdParam = req.params.tenantId;
-      const tenantId = parseInt(tenantIdParam);
-
-      logger.webhook(req.body?.event || "unknown", {
-        tenantId,
-        ip: req.ip,
-        userAgent: req.get("User-Agent"),
-      });
-
-      // Validar tenantId
-      if (!tenantId || isNaN(tenantId) || tenantId <= 0) {
-        throw createAppError(
-          "ID do tenant deve ser um número válido e positivo",
-          400
-        );
-      }
-
-      // Validar dados do webhook
-      const webhookData = webhookDataSchema.parse(req.body);
-
-      await whatsappService.processWebhook(tenantId, webhookData);
-
-      logger.info("Controller: Webhook processado", {
-        tenantId,
-        event: webhookData.event,
-      });
-
-      res.status(200).json({
-        success: true,
-        message: "Webhook processado com sucesso",
-        data: {
-          tenantId,
-          event: webhookData.event,
-          timestamp: new Date().toISOString(),
-        },
-      });
-    } catch (error) {
-      logger.error("Controller: Erro no webhook", error, {
-        tenantId: req.params.tenantId,
-        event: req.body?.event,
-      });
-      next(error);
-    }
-  }
-
-  /**
    * Obter QR Code da sessão
    * GET /api/whatsapp/qrcode/:tenantId
    */
@@ -399,6 +344,78 @@ export class WhatsAppController {
     } catch (error) {
       logger.error("Controller: Erro ao obter token", error, {
         params: req.params,
+      });
+      next(error);
+    }
+  }
+
+  /**
+   * Webhook para receber dados do Evolution - CORRIGIDO
+   */
+  async webhook(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const tenantIdParam = req.params.tenantId;
+      const tenantId = parseInt(tenantIdParam);
+
+      // Log detalhado do payload recebido
+      logger.info("🎣 Webhook Evolution API recebido", {
+        tenantId,
+        event: req.body?.event,
+        instance: req.body?.instance,
+        messageType: req.body?.data?.messageType,
+        hasMessage: !!req.body?.data?.message,
+        fullPayload: JSON.stringify(req.body, null, 2),
+      });
+
+      // Validar tenantId
+      if (!tenantId || isNaN(tenantId) || tenantId <= 0) {
+        throw createAppError(
+          "ID do tenant deve ser um número válido e positivo",
+          400
+        );
+      }
+
+      // Validar dados do webhook - USANDO SCHEMA CORRETO
+      const webhookData = evolutionWebhookSchema.parse(req.body);
+
+      // Extrair o nome da instância para validar
+      const expectedInstanceName = `tenant_${tenantId}`;
+      if (webhookData.instance !== expectedInstanceName) {
+        logger.warn("Nome da instância não confere", {
+          expected: expectedInstanceName,
+          received: webhookData.instance,
+          tenantId,
+        });
+      }
+
+      // Processar webhook
+      await whatsappService.processEvolutionWebhook(tenantId, webhookData);
+
+      logger.info("Controller: Webhook Evolution processado", {
+        tenantId,
+        event: webhookData.event,
+        instance: webhookData.instance,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Webhook processado com sucesso",
+        data: {
+          tenantId,
+          event: webhookData.event,
+          instance: webhookData.instance,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      logger.error("Controller: Erro no webhook Evolution", error, {
+        tenantId: req.params.tenantId,
+        event: req.body?.event,
+        body: req.body,
       });
       next(error);
     }
