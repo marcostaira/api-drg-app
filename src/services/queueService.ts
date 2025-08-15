@@ -1,5 +1,5 @@
 // src/services/queueService.ts
-// Serviço para gerenciamento de filas de mensagens
+// Serviço para gerenciamento de filas de mensagens - CORRIGIDO
 
 import { prisma } from "../config/database";
 import { whatsappService } from "./whatsappService";
@@ -82,7 +82,10 @@ export class QueueService {
         );
       }
 
-      // 4. Adicionar na fila
+      // 4. Verificar se existe sessão WhatsApp ativa ANTES de enfileirar
+      await this.validateWhatsAppSession(ownerId);
+
+      // 5. Adicionar na fila
       const queueItem = await prisma.$executeRaw`
         INSERT INTO wa_queue (schedule_id, owner_id, user_id, template_id, status, created_at)
         VALUES (${scheduleId}, ${ownerId}, ${userId}, ${templateData.id}, ${QueueStatus.AGUARDANDO}, NOW())
@@ -95,7 +98,7 @@ export class QueueService {
         templateType,
       });
 
-      // 5. Processar mensagem imediatamente (pode ser mudado para processamento em batch)
+      // 6. Processar mensagem imediatamente
       await this.processQueueItem(scheduleId);
 
       return {
@@ -110,6 +113,63 @@ export class QueueService {
       };
     } catch (error) {
       logger.error("Erro ao enfileirar mensagem", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validar se existe sessão WhatsApp ativa
+   */
+  private async validateWhatsAppSession(ownerId: number): Promise<void> {
+    try {
+      // Buscar sessão ativa para o owner/tenant
+      const sessions = await prisma.$queryRaw<any[]>`
+        SELECT sessionName, status, phoneNumber, connectedAt
+        FROM whatsapp_sessions 
+        WHERE tenantId = ${ownerId.toString()}
+        AND status IN ('CONNECTED', 'CONNECTING')
+        ORDER BY 
+          CASE 
+            WHEN status = 'CONNECTED' THEN 1 
+            WHEN status = 'CONNECTING' THEN 2 
+          END,
+          connectedAt DESC
+        LIMIT 1
+      `;
+
+      if (!sessions || sessions.length === 0) {
+        throw new Error(
+          `Nenhuma sessão WhatsApp ativa encontrada para tenant ${ownerId}. ` +
+            `Execute a conexão primeiro via POST /api/whatsapp/connect`
+        );
+      }
+
+      const session = sessions[0];
+
+      // Se está apenas CONNECTING, verificar se foi escaneado
+      if (session.status === "CONNECTING") {
+        throw new Error(
+          `Sessão WhatsApp ainda conectando para tenant ${ownerId}. ` +
+            `Escaneie o QR Code primeiro ou aguarde a conexão ser estabelecida.`
+        );
+      }
+
+      // Verificar se está realmente conectada
+      if (session.status !== "CONNECTED") {
+        throw new Error(
+          `Sessão WhatsApp não está conectada (status: ${session.status}) ` +
+            `para tenant ${ownerId}. Execute a conexão primeiro.`
+        );
+      }
+
+      logger.debug("Sessão WhatsApp validada", {
+        ownerId,
+        sessionName: session.sessionName,
+        status: session.status,
+        phoneNumber: session.phoneNumber,
+      });
+    } catch (error: any) {
+      logger.error("Falha na validação da sessão WhatsApp", error, { ownerId });
       throw error;
     }
   }
@@ -131,7 +191,7 @@ export class QueueService {
       `;
 
       if (!queueItems || queueItems.length === 0) {
-        logger.info("Nenhum item na fila para processar");
+        logger.info("Nenhum item na fila para processar", { scheduleId });
         return;
       }
 
@@ -184,18 +244,42 @@ export class QueueService {
       // 5. Formatar telefone para WhatsApp
       const formattedPhone = formatPhoneForWhatsApp(phoneNumber);
 
-      // 6. Enviar mensagem via WhatsApp
+      // 6. VALIDAR NOVAMENTE a sessão antes de enviar
       try {
-        await whatsappService.sendMessage(
+        await this.validateWhatsAppSession(queueItem.owner);
+      } catch (validationError) {
+        await this.updateQueueStatus(queueItem.id, QueueStatus.ERRO);
+        await this.logMessage({
+          scheduleId: queueItem.schedule_id,
+          owner: queueItem.owner,
+          userId: queueItem.user_id,
+          templateId: queueItem.template_id,
+          direction: MessageDirection.SENT,
+          message: processedMessage,
+          status: MessageStatus.ERRO,
+        });
+        throw validationError;
+      }
+
+      // 7. Enviar mensagem via WhatsApp
+      try {
+        logger.info("Enviando mensagem via WhatsApp", {
+          scheduleId,
+          patientName: patient.patients_name,
+          phoneNumber: formattedPhone,
+          messageLength: processedMessage.length,
+        });
+
+        const sendResult = await whatsappService.sendMessage(
           queueItem.owner,
           formattedPhone,
           processedMessage
         );
 
-        // 7. Atualizar status da fila
+        // 8. Atualizar status da fila para ENVIADA
         await this.updateQueueStatus(queueItem.id, QueueStatus.ENVIADA);
 
-        // 8. Registrar no log de mensagens
+        // 9. Registrar no log de mensagens
         await this.logMessage({
           scheduleId: queueItem.schedule_id,
           owner: queueItem.owner,
@@ -206,7 +290,7 @@ export class QueueService {
           status: MessageStatus.ENVIADA,
         });
 
-        // 9. Marcar agendamento como confirmado via WhatsApp
+        // 10. Marcar agendamento como confirmado via WhatsApp
         await prisma.$executeRaw`
           UPDATE of_schedules 
           SET whatsConf = 1 
@@ -217,9 +301,14 @@ export class QueueService {
           scheduleId,
           patientName: patient.patients_name,
           phoneNumber: formattedPhone,
+          messageId: sendResult?.key?.id,
         });
       } catch (sendError) {
-        logger.error("Erro ao enviar mensagem via WhatsApp", sendError);
+        logger.error("Erro ao enviar mensagem via WhatsApp", sendError, {
+          scheduleId,
+          patientName: patient.patients_name,
+          phoneNumber: formattedPhone,
+        });
 
         // Atualizar status para erro
         await this.updateQueueStatus(queueItem.id, QueueStatus.ERRO);
@@ -238,7 +327,7 @@ export class QueueService {
         throw sendError;
       }
     } catch (error) {
-      logger.error("Erro ao processar item da fila", error);
+      logger.error("Erro ao processar item da fila", error, { scheduleId });
       throw error;
     }
   }
@@ -267,29 +356,54 @@ export class QueueService {
     queueId: number,
     status: QueueStatus
   ): Promise<void> {
-    const sentAt = status === QueueStatus.ENVIADA ? ", sent_at = NOW()" : "";
+    try {
+      if (status === QueueStatus.ENVIADA) {
+        await prisma.$executeRaw`
+          UPDATE wa_queue 
+          SET status = ${status}, sent_at = NOW()
+          WHERE id = ${queueId}
+        `;
+      } else {
+        await prisma.$executeRaw`
+          UPDATE wa_queue 
+          SET status = ${status}
+          WHERE id = ${queueId}
+        `;
+      }
 
-    await prisma.$executeRaw`
-      UPDATE wa_queue 
-      SET status = ${status}${sentAt ? Prisma.sql`${sentAt}` : Prisma.empty}
-      WHERE id = ${queueId}
-    `;
+      logger.debug("Status da fila atualizado", { queueId, status });
+    } catch (error) {
+      logger.error("Erro ao atualizar status da fila", error, {
+        queueId,
+        status,
+      });
+    }
   }
 
   /**
    * Registra mensagem no log
    */
   private async logMessage(data: any): Promise<void> {
-    await prisma.$executeRaw`
-      INSERT INTO wa_messages (
-        schedule_id, owner, user_id, template_id, 
-        direction, message, status, created_at
-      )
-      VALUES (
-        ${data.scheduleId}, ${data.owner}, ${data.userId}, ${data.templateId},
-        ${data.direction}, ${data.message}, ${data.status}, NOW()
-      )
-    `;
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO wa_messages (
+          schedule_id, owner, user_id, template_id, 
+          direction, message, status, created_at
+        )
+        VALUES (
+          ${data.scheduleId}, ${data.owner}, ${data.userId}, ${data.templateId},
+          ${data.direction}, ${data.message}, ${data.status}, NOW()
+        )
+      `;
+
+      logger.debug("Mensagem registrada no log", {
+        scheduleId: data.scheduleId,
+        direction: data.direction,
+        status: data.status,
+      });
+    } catch (error) {
+      logger.error("Erro ao registrar mensagem no log", error, data);
+    }
   }
 
   /**
@@ -305,7 +419,12 @@ export class QueueService {
         LIMIT ${limit}
       `;
 
-      logger.info(`Processando ${queueItems.length} itens da fila`);
+      logger.info(`Processando ${queueItems.length} itens da fila`, { limit });
+
+      if (queueItems.length === 0) {
+        logger.info("Nenhum item na fila para processar");
+        return;
+      }
 
       for (const item of queueItems) {
         try {
@@ -314,10 +433,15 @@ export class QueueService {
           await new Promise((resolve) => setTimeout(resolve, 2000));
         } catch (error) {
           logger.error(`Erro ao processar item ${item.schedule_id}`, error);
+          // Continuar processando outros itens mesmo se um falhar
         }
       }
+
+      logger.info("Processamento da fila concluído", {
+        processedItems: queueItems.length,
+      });
     } catch (error) {
-      logger.error("Erro ao processar fila", error);
+      logger.error("Erro ao processar fila", error, { limit });
       throw error;
     }
   }
@@ -326,29 +450,76 @@ export class QueueService {
    * Cancela envio de mensagem
    */
   async cancelQueueItem(scheduleId: number): Promise<void> {
-    await prisma.$executeRaw`
-      UPDATE wa_queue 
-      SET status = ${QueueStatus.CANCELADA}
-      WHERE schedule_id = ${scheduleId}
-      AND status = ${QueueStatus.AGUARDANDO}
-    `;
+    try {
+      const result = await prisma.$executeRaw`
+        UPDATE wa_queue 
+        SET status = ${QueueStatus.CANCELADA}
+        WHERE schedule_id = ${scheduleId}
+        AND status = ${QueueStatus.AGUARDANDO}
+      `;
 
-    logger.info(`Envio cancelado para agendamento ${scheduleId}`);
+      logger.info(`Envio cancelado para agendamento ${scheduleId}`, {
+        affectedRows: result,
+      });
+    } catch (error) {
+      logger.error("Erro ao cancelar envio", error, { scheduleId });
+      throw error;
+    }
   }
 
   /**
    * Busca histórico de mensagens de um agendamento
    */
   async getMessageHistory(scheduleId: number): Promise<any[]> {
-    const messages = await prisma.$queryRaw<any[]>`
-      SELECT m.*, t.type as template_type
-      FROM wa_messages m
-      LEFT JOIN wa_templates t ON m.template_id = t.id
-      WHERE m.schedule_id = ${scheduleId}
-      ORDER BY m.created_at DESC
-    `;
+    try {
+      const messages = await prisma.$queryRaw<any[]>`
+        SELECT m.*, t.type as template_type
+        FROM wa_messages m
+        LEFT JOIN wa_templates t ON m.template_id = t.id
+        WHERE m.schedule_id = ${scheduleId}
+        ORDER BY m.created_at DESC
+      `;
 
-    return messages;
+      logger.debug("Histórico de mensagens obtido", {
+        scheduleId,
+        messageCount: messages.length,
+      });
+
+      return messages;
+    } catch (error) {
+      logger.error("Erro ao buscar histórico de mensagens", error, {
+        scheduleId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Forçar atualização do status da sessão para CONNECTED
+   */
+  async forceUpdateSessionStatus(
+    tenantId: number,
+    phoneNumber: string
+  ): Promise<void> {
+    try {
+      await prisma.$executeRaw`
+        UPDATE whatsapp_sessions 
+        SET status = 'CONNECTED', 
+            phoneNumber = ${phoneNumber},
+            connectedAt = NOW(),
+            updatedAt = NOW()
+        WHERE tenantId = ${tenantId.toString()}
+        AND sessionName = ${`tenant_${tenantId}`}
+      `;
+
+      logger.info("Status da sessão atualizado para CONNECTED", {
+        tenantId,
+        phoneNumber,
+      });
+    } catch (error) {
+      logger.error("Erro ao atualizar status da sessão", error, { tenantId });
+      throw error;
+    }
   }
 }
 

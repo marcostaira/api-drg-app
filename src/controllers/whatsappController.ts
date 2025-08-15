@@ -1,5 +1,5 @@
 // src/controllers/whatsappController.ts
-// Controller WhatsApp com validações melhoradas e suporte a API Key
+// Controller WhatsApp corrigido - sem API Key no body
 
 import { Request, Response, NextFunction } from "express";
 import { whatsappService } from "../services/whatsappService";
@@ -16,11 +16,10 @@ import {
   type SendMessageRequest,
   type StatusRequest,
 } from "../schemas/whatsappSchemas";
-import { prisma } from "@/config/database";
 
 export class WhatsAppController {
   /**
-   * Conectar tenant ao WhatsApp
+   * Conectar tenant ao WhatsApp - SEM API KEY NO BODY
    * POST /api/whatsapp/connect
    */
   async connect(
@@ -30,21 +29,14 @@ export class WhatsAppController {
   ): Promise<void> {
     try {
       logger.info("Controller: Iniciando conexão", {
-        body: {
-          ...req.body,
-          evolutionApiKey: req.body.evolutionApiKey ? "[REDACTED]" : undefined,
-        },
+        body: req.body,
         ip: req.ip,
       });
 
-      const { tenantId, evolutionApiKey }: ConnectRequest = connectSchema.parse(
-        req.body
-      );
+      const { tenantId }: ConnectRequest = connectSchema.parse(req.body);
 
-      const result = await whatsappService.connectTenant(
-        tenantId,
-        evolutionApiKey
-      );
+      // Chama serviço SEM API Key (usa do .env)
+      const result = await whatsappService.connectTenant(tenantId);
 
       logger.info("Controller: Conexão processada", {
         tenantId,
@@ -55,11 +47,15 @@ export class WhatsAppController {
       res.status(200).json({
         success: true,
         message: "Processo de conexão iniciado com sucesso",
-        data: result,
+        data: {
+          ...result,
+          // Remover API Key da resposta por segurança
+          evolutionApiKey: undefined,
+        },
       });
     } catch (error) {
       logger.error("Controller: Erro na conexão", error, {
-        body: { ...req.body, evolutionApiKey: "[REDACTED]" },
+        body: req.body,
       });
       next(error);
     }
@@ -187,9 +183,10 @@ export class WhatsAppController {
   }
 
   /**
-   * Webhook para receber dados do Evolution
-   * POST /api/webhook/whatsapp/:tenantId
-   */
+
+  * Webhook para receber dados do Evolution
+  * POST /api/webhook/whatsapp/:tenantId
+  */
   async webhook(
     req: Request,
     res: Response,
@@ -357,53 +354,51 @@ export class WhatsAppController {
   }
 
   /**
-   * Atualizar API Key da sessão
-   * PUT /api/whatsapp/api-key
+   * Obter token da sessão
+   * GET /api/whatsapp/token/:tenantId
    */
-  async updateApiKey(
+  async getSessionToken(
     req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> {
     try {
-      logger.info("Controller: Atualizando API Key", {
-        body: { ...req.body, evolutionApiKey: "[REDACTED]" },
+      logger.debug("Controller: Obtendo token da sessão", {
+        params: req.params,
         ip: req.ip,
       });
 
-      const { tenantId, evolutionApiKey } = req.body;
+      const { tenantId }: StatusRequest = statusSchema.parse(req.params);
 
-      if (!tenantId || !evolutionApiKey) {
-        throw createAppError(
-          "TenantId e evolutionApiKey são obrigatórios",
-          400
-        );
+      // CHAMA O SERVICE
+      const sessionToken = await whatsappService.getSessionToken(tenantId);
+
+      if (!sessionToken) {
+        res.status(404).json({
+          success: false,
+          message: "Token não encontrado para esta sessão",
+          data: { tenantId },
+        });
+        return;
       }
 
-      // Atualizar API Key na sessão existente
-      const session = await prisma.whatsAppSession.findFirst({
-        where: { tenantId },
+      logger.info("Controller: Token obtido", {
+        tenantId,
+        hasToken: !!sessionToken,
       });
-
-      if (!session) {
-        throw createAppError("Sessão não encontrada para este tenant", 404);
-      }
-
-      await prisma.whatsAppSession.update({
-        where: { id: session.id },
-        data: { evolutionApiKey },
-      });
-
-      logger.info("Controller: API Key atualizada", { tenantId });
 
       res.status(200).json({
         success: true,
-        message: "API Key atualizada com sucesso",
-        data: { tenantId },
+        message: "Token obtido com sucesso",
+        data: {
+          tenantId,
+          sessionToken,
+          timestamp: new Date().toISOString(),
+        },
       });
     } catch (error) {
-      logger.error("Controller: Erro ao atualizar API Key", error, {
-        body: { ...req.body, evolutionApiKey: "[REDACTED]" },
+      logger.error("Controller: Erro ao obter token", error, {
+        params: req.params,
       });
       next(error);
     }

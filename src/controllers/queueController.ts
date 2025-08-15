@@ -8,10 +8,13 @@ import { createAppError } from "../middlewares/errorHandler";
 import { logger } from "../utils/logger";
 import { prisma } from "@/config/database";
 
-// Schemas de validação
+// Schemas de validação - CORRIGIDO
 const enqueueSchema = z.object({
-  scheduleId: z.coerce.number().int().positive(),
-  userId: z.coerce.number().int().positive().optional(),
+  scheduleId: z.coerce
+    .number()
+    .int()
+    .positive("Schedule ID deve ser um número positivo"),
+  userId: z.coerce.number().int().positive().optional().default(1),
   templateType: z.string().optional().default("confirmacao"),
 });
 
@@ -20,11 +23,17 @@ const processQueueSchema = z.object({
 });
 
 const cancelSchema = z.object({
-  scheduleId: z.coerce.number().int().positive(),
+  scheduleId: z.coerce
+    .number()
+    .int()
+    .positive("Schedule ID deve ser um número positivo"),
 });
 
 const historySchema = z.object({
-  scheduleId: z.coerce.number().int().positive(),
+  scheduleId: z.coerce
+    .number()
+    .int()
+    .positive("Schedule ID deve ser um número positivo"),
 });
 
 export class QueueController {
@@ -41,11 +50,7 @@ export class QueueController {
 
       const result = await queueService.enqueueMessage(data);
 
-      res.status(200).json({
-        success: true,
-        message: "Mensagem adicionada à fila com sucesso",
-        data: result,
-      });
+      res.status(200).json(result);
     } catch (error) {
       logger.error("Erro ao enfileirar mensagem", error);
       next(error);

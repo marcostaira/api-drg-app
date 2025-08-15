@@ -76,4 +76,14 @@ router.get(
  */
 router.get("/health", whatsappController.health.bind(whatsappController));
 
+/**
+ * @route   GET /api/whatsapp/token/:tenantId
+ * @desc    Obter token da sessão WhatsApp
+ * @access  Private
+ * @params  tenantId: number
+ */
+router.get(
+  "/token/:tenantId",
+  whatsappController.getSessionToken.bind(whatsappController)
+);
 export default router;

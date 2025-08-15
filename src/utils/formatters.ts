@@ -2,8 +2,7 @@
 // Funções de formatação para WhatsApp
 
 /**
- * Formata número de telefone para o padrão do WhatsApp
- * Aceita vários formatos e converte para 55XXXXXXXXXXX
+ * Formata número de telefone para o padrão do WhatsApp - CORRIGIDO
  */
 export const formatPhoneForWhatsApp = (phone: string): string => {
   if (!phone) return "";
@@ -14,50 +13,37 @@ export const formatPhoneForWhatsApp = (phone: string): string => {
   // Remove zeros à esquerda
   cleaned = cleaned.replace(/^0+/, "");
 
-  // Se começar com 55, mantém
-  if (cleaned.startsWith("55")) {
-    // Já está no formato correto
-    return cleaned;
-  }
+  console.log("🔍 Formatando telefone:", {
+    original: phone,
+    cleaned: cleaned,
+    length: cleaned.length,
+  });
 
-  // Se tiver 11 dígitos (com DDD e 9º dígito)
-  if (cleaned.length === 11) {
-    return `55${cleaned}`;
-  }
-
-  // Se tiver 10 dígitos (com DDD sem 9º dígito - adiciona)
-  if (cleaned.length === 10) {
-    const ddd = cleaned.substring(0, 2);
-    const number = cleaned.substring(2);
-    // Adiciona o 9 para celulares
-    return `55${ddd}9${number}`;
-  }
-
-  // Se tiver 9 dígitos (sem DDD, com 9º dígito - assume DDD 11)
-  if (cleaned.length === 9 && cleaned.startsWith("9")) {
-    return `5511${cleaned}`;
-  }
-
-  // Se tiver 8 dígitos (sem DDD, sem 9º dígito - assume DDD 11 e adiciona 9)
-  if (cleaned.length === 8) {
-    return `55119${cleaned}`;
-  }
-
-  // Se tiver 13 dígitos (já com código do país e 9º dígito)
+  // Se já tem 13 dígitos e começa com 55
   if (cleaned.length === 13 && cleaned.startsWith("55")) {
+    console.log("✅ Número já formatado corretamente:", cleaned);
     return cleaned;
   }
 
-  // Se tiver 12 dígitos (com código do país mas sem 9º dígito)
+  // Se tem 11 dígitos (DDD + 9 + 8 dígitos)
+  if (cleaned.length === 11) {
+    const formatted = `55${cleaned}`;
+    console.log("✅ Adicionado código do país:", formatted);
+    return formatted;
+  }
+
+  // Se tem 12 dígitos e começa com 55 (sem o 9)
   if (cleaned.length === 12 && cleaned.startsWith("55")) {
-    const countryCode = cleaned.substring(0, 2);
     const ddd = cleaned.substring(2, 4);
     const number = cleaned.substring(4);
-    return `${countryCode}${ddd}9${number}`;
+    const formatted = `55${ddd}9${number}`;
+    console.log("✅ Adicionado nono dígito:", formatted);
+    return formatted;
   }
 
-  // Retorna o número limpo com código do Brasil por padrão
-  return `55${cleaned}`;
+  // Log de debug para outros casos
+  console.log("⚠️ Formato não reconhecido, retornando como está:", cleaned);
+  return cleaned;
 };
 
 /**

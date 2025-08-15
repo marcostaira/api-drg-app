@@ -1,5 +1,5 @@
 // src/services/evolutionService.ts
-// Serviço para integração com Evolution API v2 com API Key por sessão
+// Serviço para integração com Evolution API v2 - CORRIGIDO com fetchInstances
 
 import axios, { AxiosInstance, AxiosError } from "axios";
 import { config } from "../config/config";
@@ -13,6 +13,7 @@ import type {
   EvolutionSessionInfo,
   SendTextMessagePayload,
   SendTextMessageOptions,
+  EvolutionInstanceData, // Novo tipo
 } from "../types/evolution.types";
 
 export class EvolutionService {
@@ -78,23 +79,75 @@ export class EvolutionService {
   }
 
   /**
-   * Obter informações detalhadas da instância
+   * Obter informações detalhadas da instância via fetchInstances
    */
   async getSessionInfo(
     instanceName: string,
     apiKey: string
-  ): Promise<EvolutionSessionInfo | null> {
+  ): Promise<EvolutionInstanceData | null> {
     try {
       logger.evolution("GET_SESSION_INFO", instanceName);
 
       const axiosInstance = this.createAxiosInstance(apiKey);
-      const response = await axiosInstance.get(`/instance/${instanceName}`);
 
-      logger.evolution("SESSION_INFO_RETRIEVED", instanceName, response.data);
-      return response.data;
+      // Usar fetchInstances com filtro por nome
+      const response = await axiosInstance.get(
+        `/instance/fetchInstances?name=${instanceName}`
+      );
+
+      if (
+        response.data &&
+        Array.isArray(response.data) &&
+        response.data.length > 0
+      ) {
+        const instanceData = response.data[0]; // Primeiro resultado
+
+        logger.evolution("SESSION_INFO_RETRIEVED", instanceName, {
+          token: instanceData.token ? "***" : "null",
+          connectionStatus: instanceData.connectionStatus,
+          ownerJid: instanceData.ownerJid,
+        });
+
+        return instanceData;
+      }
+
+      logger.evolution("SESSION_INFO_NOT_FOUND", instanceName);
+      return null;
     } catch (error: any) {
       logger.evolution(
         "GET_SESSION_INFO_ERROR",
+        instanceName,
+        undefined,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Obter token da sessão específico
+   */
+  async getSessionToken(
+    instanceName: string,
+    apiKey: string
+  ): Promise<string | null> {
+    try {
+      logger.evolution("GET_SESSION_TOKEN", instanceName);
+
+      const sessionInfo = await this.getSessionInfo(instanceName, apiKey);
+
+      if (sessionInfo && sessionInfo.token) {
+        logger.evolution("SESSION_TOKEN_RETRIEVED", instanceName, {
+          hasToken: true,
+        });
+        return sessionInfo.token;
+      }
+
+      logger.evolution("SESSION_TOKEN_NOT_FOUND", instanceName);
+      return null;
+    } catch (error: any) {
+      logger.evolution(
+        "GET_SESSION_TOKEN_ERROR",
         instanceName,
         undefined,
         error
@@ -379,7 +432,7 @@ export class EvolutionService {
   }
 
   /**
-   * Enviar mensagem de texto com opções completas
+   * Enviar mensagem de texto - CORRIGIDO sem campos vazios
    */
   async sendTextMessage(
     instanceName: string,
@@ -389,39 +442,110 @@ export class EvolutionService {
     options?: SendTextMessageOptions
   ): Promise<any> {
     try {
-      const payload: SendTextMessagePayload = {
-        number: phoneNumber,
-        text: text,
-        delay: options?.delay || 0,
-        linkPreview: options?.linkPreview || false,
-        mentionsEveryOne: options?.mentionsEveryOne || false,
-        mentioned: options?.mentioned || [],
-        quoted: options?.quoted,
+      // Validar inputs
+      if (!instanceName || !apiKey || !phoneNumber || !text) {
+        throw new Error(
+          "Parâmetros obrigatórios faltando para envio de mensagem"
+        );
+      }
+
+      // Garantir que o número está no formato correto (apenas números)
+      const cleanNumber = phoneNumber.replace(/\D/g, "");
+
+      // PAYLOAD MÍNIMO - apenas campos obrigatórios
+      const payload: any = {
+        number: cleanNumber,
+        text: text.trim(),
       };
 
-      logger.evolution("SEND_TEXT_MESSAGE", instanceName, {
-        phoneNumber,
-        hasOptions: !!options,
+      // Adicionar campos opcionais APENAS se tiverem valores válidos
+      if (options?.delay && options.delay > 0) {
+        payload.delay = options.delay;
+      }
+
+      if (options?.linkPreview === true) {
+        payload.linkPreview = true;
+      }
+
+      if (options?.mentionsEveryOne === true) {
+        payload.mentionsEveryOne = true;
+      }
+
+      // IMPORTANTE: só adicionar mentioned se tiver valores
+      if (options?.mentioned && options.mentioned.length > 0) {
+        payload.mentioned = options.mentioned;
+      }
+
+      // IMPORTANTE: só adicionar quoted se existir
+      if (options?.quoted) {
+        payload.quoted = options.quoted;
+      }
+
+      logger.info("Preparando envio de mensagem", {
+        instanceName,
+        phoneNumber: cleanNumber,
+        textLength: text.length,
+        fieldsCount: Object.keys(payload).length,
       });
 
       const axiosInstance = this.createAxiosInstance(apiKey);
-      const response = await axiosInstance.post(
-        `/message/sendText/${instanceName}`,
-        payload
-      );
+      const url = `/message/sendText/${instanceName}`;
 
-      logger.evolution("MESSAGE_SENT", instanceName, {
-        messageId: response.data?.id,
+      logger.debug("Dados da requisição Evolution", {
+        url: `${this.baseURL}${url}`,
+        payload,
+        headers: { apikey: apiKey.substring(0, 8) + "..." },
+      });
+
+      const response = await axiosInstance.post(url, payload);
+
+      logger.info("Mensagem enviada com sucesso via Evolution", {
+        instanceName,
+        phoneNumber: cleanNumber,
+        messageId: response.data?.key?.id,
+        status: response.status,
       });
 
       return response.data;
     } catch (error: any) {
+      const axiosError = error as AxiosError;
+
+      // Log detalhado do erro
+      if (axiosError.response) {
+        logger.error("Erro na Evolution API - Response", {
+          instanceName,
+          phoneNumber,
+          status: axiosError.response.status,
+          statusText: axiosError.response.statusText,
+          data: axiosError.response.data,
+          url: axiosError.config?.url,
+        });
+      } else if (axiosError.request) {
+        logger.error("Erro na Evolution API - Request", {
+          instanceName,
+          phoneNumber,
+          message: "Nenhuma resposta recebida",
+          url: axiosError.config?.url,
+        });
+      } else {
+        logger.error("Erro na Evolution API - Config", {
+          instanceName,
+          phoneNumber,
+          message: axiosError.message,
+        });
+      }
+
       logger.evolution(
         "SEND_MESSAGE_ERROR",
         instanceName,
-        { phoneNumber },
+        {
+          phoneNumber,
+          errorStatus: axiosError.response?.status,
+          errorMessage: axiosError.message,
+        },
         error
       );
+
       throw error;
     }
   }

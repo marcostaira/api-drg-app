@@ -1,18 +1,14 @@
 // src/schemas/whatsappSchemas.ts
-// Schemas de validação para WhatsApp com API Key
+// Schemas de validação para WhatsApp - API Key opcional
 
 import { z } from "zod";
 
-// Schema para conectar tenant
+// Schema para conectar tenant - SEM API Key (usa do .env)
 export const connectSchema = z.object({
   tenantId: z.coerce
     .number()
     .int()
     .positive("ID do tenant deve ser um número positivo"),
-  evolutionApiKey: z
-    .string()
-    .min(1, "API Key é obrigatória")
-    .max(500, "API Key muito longa"),
 });
 
 // Schema para desconectar
@@ -71,22 +67,9 @@ export const webhookDataSchema = z.object({
   data: z.any().optional(),
 });
 
-// Schema para atualizar API Key
-export const updateApiKeySchema = z.object({
-  tenantId: z.coerce
-    .number()
-    .int()
-    .positive("ID do tenant deve ser um número positivo"),
-  evolutionApiKey: z
-    .string()
-    .min(1, "API Key é obrigatória")
-    .max(500, "API Key muito longa"),
-});
-
 // Tipos TypeScript exportados
 export type ConnectRequest = z.infer<typeof connectSchema>;
 export type DisconnectRequest = z.infer<typeof disconnectSchema>;
 export type SendMessageRequest = z.infer<typeof sendMessageSchema>;
 export type StatusRequest = z.infer<typeof statusSchema>;
 export type WebhookData = z.infer<typeof webhookDataSchema>;
-export type UpdateApiKeyRequest = z.infer<typeof updateApiKeySchema>;

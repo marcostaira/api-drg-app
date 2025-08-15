@@ -7,12 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Tabela whatsapp_sessions - CORRIGIDA com os campos corretos
+// Tabela whatsapp_sessions - CORRIGIDA conforme SQL
 model WhatsAppSession {
   id              String                   @id @default(uuid())
   tenantId        String                   @map("tenantId") @db.VarChar(191)
   sessionName     String                   @unique @map("sessionName") @db.VarChar(191)
   evolutionApiKey String?                  @map("evolution_api_key") @db.VarChar(255)
+  sessionToken    String?                  @map("session_token") @db.VarChar(255) // NOVO CAMPO
   apiKey          String?                  @map("api_key") @db.VarChar(255)
   status          WhatsAppSessionStatus    @default(DISCONNECTED)
   phoneNumber     String?                  @map("phoneNumber") @db.VarChar(191)
@@ -31,7 +32,7 @@ model WhatsAppSession {
   @@map("whatsapp_sessions")
 }
 
-// Tabela received_messages
+// Tabela received_messages - CORRIGIDA conforme SQL
 model ReceivedMessage {
   id                String          @id @default(uuid())
   whatsappSessionId String
@@ -50,9 +51,9 @@ model ReceivedMessage {
   @@map("received_messages")
 }
 
-// Tabela tenants (nova tabela criada pelo Prisma)
+// Tabela tenants - CORRIGIDA conforme SQL
 model Tenant {
-  id        String    @id @default(uuid())
+  id        String    @id @db.VarChar(191) // String conforme SQL
   name      String
   active    Boolean   @default(true)
   createdAt DateTime  @default(now()) @map("createdAt")
@@ -64,7 +65,7 @@ model Tenant {
   @@map("tenants")
 }
 
-// Tabela of_clients (tenant existente do sistema legado)
+// Tabela of_clients - CORRIGIDA conforme SQL real
 model OfClient {
   id                    Int       @id @default(autoincrement())
   origin                String?   @db.VarChar(255)
@@ -110,9 +111,139 @@ model OfClient {
   @@map("of_clients")
 }
 
+// Tabela all_patients - Para o sistema de filas
+model AllPatient {
+  id             Int       @id @default(autoincrement())
+  owner          Int
+  idLegacy       BigInt?   @map("id_legacy")
+  photo          String?   @db.VarChar(100)
+  thumbnail      String?   @db.VarChar(100)
+  patientsName   String?   @map("patients_name") @db.VarChar(255)
+  patientsGender String?   @map("patients_gender") @db.VarChar(10)
+  patientsDateb  DateTime? @map("patients_dateb") @db.Date
+  parentName     String?   @map("parent_name") @db.VarChar(255)
+  parentDocCpf   String?   @map("parent_doc_cpf") @db.VarChar(255)
+  addrCep        String?   @map("addr_cep") @db.VarChar(9)
+  addrAddr       String?   @map("addr_addr") @db.Text
+  addrNumber     String?   @map("addr_number") @db.VarChar(45)
+  addrPlus       String?   @map("addr_plus") @db.VarChar(255)
+  addrArea       String?   @map("addr_area") @db.Text
+  addrCity       String?   @map("addr_city") @db.VarChar(255)
+  addrUf         String?   @map("addr_uf") @db.VarChar(2)
+  tel1           String?   @db.VarChar(255)
+  tel2           String?   @db.VarChar(255)
+  email          String?   @db.VarChar(255)
+  allergies      String?   @db.Text
+  historic       String?   @db.Text
+  asaasId        String?   @map("asaas_id") @db.VarChar(45)
+  userAdd        Int?      @map("user_add")
+  asaasIdForte   String?   @map("asaas_id_forte") @db.VarChar(45)
+  companyAdd     Int?      @map("company_add")
+  dateAdd        DateTime? @default(now()) @map("date_add")
+  userLastupdate Int?      @map("user_lastupdate")
+  dateLastupdate DateTime? @default(now()) @map("date_lastupdate")
+  active         Boolean?  @default(true)
+
+  @@index([patientsName], map: "patients_name")
+  @@index([tel1], map: "tel1")
+  @@map("all_patients")
+}
+
+// Tabela of_schedules - Para o sistema de filas
+model OfSchedule {
+  id                 Int       @id @default(autoincrement())
+  owner              Int
+  sts                Int?
+  stsPayment         Int?      @map("sts_payment")
+  patient            Int?
+  partner            Int?
+  surgery            Boolean?  @default(false)
+  dates              DateTime? @db.Date
+  times              String?   @db.VarChar(10)
+  procedures         String?   @db.Text
+  longi              Int?
+  price              String?   @db.VarChar(45)
+  description        String?   @db.Text
+  descriptionPayment String?   @map("description_payment") @db.Text
+  attachments        String?   @db.Text
+  userAdd            Int?      @map("user_add")
+  dateAdd            DateTime? @map("date_add")
+  userLastupdate     Int?      @map("user_lastupdate")
+  dateLastupdate     DateTime? @map("date_lastupdate")
+  whatsConf          Boolean?  @default(false) @map("whatsConf")
+  sedation           Boolean?  @default(false)
+  difficult          Boolean?  @default(false)
+  laboratory         Boolean?  @default(false)
+
+  @@index([partner], map: "partner")
+  @@index([dates], map: "dates")
+  @@index([sts], map: "sts")
+  @@map("of_schedules")
+}
+
+// Tabela wa_templates - Para o sistema de filas
+model WaTemplate {
+  id        Int       @id @default(autoincrement())
+  ownerId   Int       @map("owner_id")
+  type      String    @db.VarChar(50)
+  content   String    @db.Text
+  active    Boolean?  @default(true)
+  createdAt DateTime? @default(now()) @map("created_at")
+
+  @@map("wa_templates")
+}
+
+// Tabela wa_queue - Para o sistema de filas
+model WaQueue {
+  id         Int              @id @default(autoincrement())
+  scheduleId Int              @map("schedule_id")
+  ownerId    Int              @map("owner_id")
+  userId     Int              @map("user_id")
+  templateId Int              @map("template_id")
+  status     WaQueueStatus?   @default(Aguardando)
+  createdAt  DateTime?        @default(now()) @map("created_at")
+  sentAt     DateTime?        @map("sent_at")
+
+  @@map("wa_queue")
+}
+
+// Tabela wa_messages - Para o sistema de filas
+model WaMessage {
+  id         Int                @id @default(autoincrement())
+  scheduleId Int                @map("schedule_id")
+  owner      Int
+  userId     Int                @map("user_id")
+  templateId Int?               @map("template_id")
+  direction  WaMessageDirection
+  message    String             @db.Text
+  status     WaMessageStatus?
+  createdAt  DateTime?          @default(now()) @map("created_at")
+
+  @@map("wa_messages")
+}
+
+// Enums
 enum WhatsAppSessionStatus {
   CONNECTING
   CONNECTED
   DISCONNECTED
   ERROR
+}
+
+enum WaQueueStatus {
+  Aguardando
+  Enviada
+  Cancelada
+  Erro
+}
+
+enum WaMessageDirection {
+  sent
+  received
+}
+
+enum WaMessageStatus {
+  Enviada
+  Recebida
+  Erro
 }

@@ -1,5 +1,5 @@
-// src/types/whatsapp.ts
-// Interfaces e tipos para WhatsApp API
+// src/types/whatsapp.types.ts
+// Interfaces e tipos para WhatsApp API - CORRIGIDO sessionToken
 
 export interface WhatsAppConnectionResult {
   sessionId: string;
@@ -7,6 +7,8 @@ export interface WhatsAppConnectionResult {
   status: string;
   qrCode?: string;
   webhookUrl: string;
+  sessionToken?: string | null; // CORRIGIDO: aceitar null
+  evolutionApiKey?: string;
   message?: string;
 }
 
@@ -16,16 +18,20 @@ export interface WhatsAppSessionStatus {
   phoneNumber?: string;
   profileName?: string;
   sessionName?: string;
+  sessionToken?: string | null; // CORRIGIDO: aceitar null
   connectedAt?: Date;
   evolutionStatus?: string;
+  connectionStatus?: string;
+  ownerJid?: string;
   sessionInfo?: any;
   error?: string;
   message?: string;
 }
 
+// ... resto dos tipos permanece igual
 export interface WebhookData {
   event: string;
-  data?: any; // Tornar opcional para compatibilidade
+  data?: any;
 }
 
 export interface QRCodeData {
@@ -66,6 +72,7 @@ export interface SendMessageRequest {
 
 export interface ConnectRequest {
   tenantId: number;
+  // evolutionApiKey removido - agora usa do .env
 }
 
 export interface DisconnectRequest {

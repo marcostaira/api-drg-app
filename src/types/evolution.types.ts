@@ -1,5 +1,5 @@
 // src/types/evolution.types.ts
-// Tipos para integração com Evolution API v2
+// Tipos para integração com Evolution API v2 - CORRIGIDO com fetchInstances
 
 export interface EvolutionInstance {
   instance: {
@@ -9,6 +9,50 @@ export interface EvolutionInstance {
   qrcode?: {
     code: string;
     base64: string;
+  };
+}
+
+// NOVO: Tipo para dados completos da instância via fetchInstances
+export interface EvolutionInstanceData {
+  id: string;
+  name: string;
+  connectionStatus: "open" | "close" | "connecting";
+  ownerJid: string;
+  profileName: string | null;
+  profilePicUrl: string | null;
+  integration: string;
+  number: string | null;
+  businessId: string | null;
+  token: string; // IMPORTANTE: Token da sessão
+  clientName: string;
+  disconnectionReasonCode: number | null;
+  disconnectionObject: any | null;
+  disconnectionAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  Chatwoot: any | null;
+  Proxy: any | null;
+  Rabbitmq: any | null;
+  Sqs: any | null;
+  Websocket: any | null;
+  Setting: {
+    id: string;
+    rejectCall: boolean;
+    msgCall: string;
+    groupsIgnore: boolean;
+    alwaysOnline: boolean;
+    readMessages: boolean;
+    readStatus: boolean;
+    syncFullHistory: boolean;
+    wavoipToken: string;
+    createdAt: string;
+    updatedAt: string;
+    instanceId: string;
+  };
+  _count: {
+    Message: number;
+    Contact: number;
+    Chat: number;
   };
 }
 
